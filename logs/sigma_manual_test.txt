@@ -1,0 +1,7 @@
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import traceback; from src.current_daemon.config import build_config; from src.current_daemon.sigma_studio import SigmaStudioDownloader, SigmaStudioSettings; c=build_config(); d=SigmaStudioDownloader(SigmaStudioSettings(c.sigma_studio_dll_path, c.sigma_downloader_executable_path, True)); print('START'); result=d.trigger_sigma_studio_download(); print('SUCCESS', result.mode, result.message)
+                                                                                                                                                                                                                                                                                                                                                               ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'cp949' codec can't encode character '\u2705' in position 0: illegal multibyte sequence
+START
+SUCCESS pythonnet 

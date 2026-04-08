@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+
+<html class="light" lang="ko"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>PRECISION LAB - Measurement Station</title>
+<!-- Fonts -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Manrope:wght@600;700;800&amp;display=swap" rel="stylesheet"/>
+<!-- Icons -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              colors: {
+                "on-tertiary-fixed-variant": "#6a3b00",
+                "on-tertiary-container": "#fffbff",
+                "surface-container-low": "#f3f4f5",
+                "on-secondary-fixed-variant": "#284b58",
+                "secondary-fixed": "#c3e8f8",
+                "background": "#f8f9fa",
+                "primary-fixed": "#b7eaff",
+                "inverse-primary": "#6cd3f7",
+                "surface-dim": "#d9dadb",
+                "on-surface-variant": "#3e484d",
+                "on-primary-fixed-variant": "#004e61",
+                "surface-variant": "#e1e3e4",
+                "on-secondary": "#ffffff",
+                "tertiary": "#894e00",
+                "surface-container": "#edeeef",
+                "on-error": "#ffffff",
+                "on-tertiary": "#ffffff",
+                "primary-container": "#007f9d",
+                "on-surface": "#191c1d",
+                "outline": "#6e797e",
+                "secondary-fixed-dim": "#a8ccdb",
+                "surface-bright": "#f8f9fa",
+                "on-background": "#191c1d",
+                "error": "#ba1a1a",
+                "primary": "#00647c",
+                "surface": "#f8f9fa",
+                "on-error-container": "#93000a",
+                "surface-container-highest": "#e1e3e4",
+                "tertiary-fixed": "#ffdcbf",
+                "error-container": "#ffdad6",
+                "outline-variant": "#bdc8ce",
+                "secondary": "#406370",
+                "on-secondary-fixed": "#001f28",
+                "on-secondary-container": "#466977",
+                "inverse-surface": "#2e3132",
+                "inverse-on-surface": "#f0f1f2",
+                "primary-fixed-dim": "#6cd3f7",
+                "on-primary": "#ffffff",
+                "surface-container-high": "#e7e8e9",
+                "tertiary-container": "#a86516",
+                "on-primary-container": "#fafdff",
+                "on-tertiary-fixed": "#2d1600",
+                "secondary-container": "#c3e8f8",
+                "surface-container-lowest": "#ffffff",
+                "surface-tint": "#006780",
+                "on-primary-fixed": "#001f28",
+                "tertiary-fixed-dim": "#ffb873"
+              },
+              fontFamily: {
+                "headline": ["Manrope"],
+                "body": ["Inter"],
+                "label": ["Inter"]
+              },
+              borderRadius: {"DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px"},
+            },
+          },
+        }
+      </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        body { font-family: 'Inter', sans-serif; }
+        h1, h2, h3 { font-family: 'Manrope', sans-serif; }
+    </style>
+</head>
+<body class="bg-surface text-on-surface min-h-screen flex flex-col">
+<!-- TopAppBar -->
+<header class="bg-[#f8f9fa] flex justify-between items-center w-full px-8 h-16 sticky top-0 z-50">
+<div class="flex items-center gap-4">
+<h1 class="text-2xl font-bold tracking-tight text-[#191c1d]">PRECISION LAB</h1>
+</div>
+<div class="flex items-center gap-6">
+<div class="flex items-center gap-2 px-3 py-1 bg-surface-container rounded-full">
+<div class="w-2 h-2 rounded-full bg-primary animate-pulse"></div>
+<span class="text-label-sm font-medium uppercase tracking-wider text-primary">COM Connected</span>
+</div>
+<button class="p-2 text-[#191c1d] hover:bg-[#edeeef] transition-colors rounded-full active:opacity-80 active:scale-95">
+<span class="material-symbols-outlined" data-icon="refresh">refresh</span>
+</button>
+</div>
+</header>
+<main class="flex-grow container mx-auto px-8 pt-12 pb-24 max-w-6xl">
+<!-- Measurement Flow Grid -->
+<div class="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+<!-- Left Column: Input & Status -->
+<div class="lg:col-span-5 space-y-8">
+<!-- S/N Input Section -->
+<section class="space-y-3">
+<label class="flex items-center gap-2 text-label-sm font-semibold uppercase tracking-widest text-outline">
+                        Serial Number Input / 시리얼 번호 입력
+                    </label>
+<div class="relative group">
+<input class="w-full h-16 pl-6 pr-14 bg-surface-container-high border-none rounded-lg focus:ring-0 focus:bg-surface-container-lowest transition-all duration-300 text-headline-md font-medium placeholder:text-outline-variant" placeholder="Scan QR or Enter S/N" type="text"/>
+<button class="absolute right-4 top-1/2 -translate-y-1/2 p-2 text-primary hover:bg-primary-container/10 rounded-full">
+<span class="material-symbols-outlined text-3xl" data-icon="qr_code_scanner">qr_code_scanner</span>
+</button>
+<div class="absolute bottom-0 left-0 h-0.5 w-0 group-focus-within:w-full bg-primary transition-all duration-500"></div>
+</div>
+</section>
+<!-- Waiting Status Area -->
+<div class="bg-surface-container-low p-12 rounded-xl flex flex-col items-center justify-center text-center space-y-6 aspect-square lg:aspect-auto">
+<div class="relative">
+<div class="absolute -inset-4 bg-primary/5 rounded-full blur-2xl"></div>
+<span class="material-symbols-outlined text-8xl text-primary/40 relative" data-icon="hourglass_empty">hourglass_empty</span>
+</div>
+<div>
+<h2 class="text-display-lg font-extrabold tracking-tight text-primary">WAITTING</h2>
+<p class="text-body-md text-on-surface-variant mt-2 font-medium">측정 대기 중 / Ready for Measurement</p>
+</div>
+<div class="flex gap-2">
+<div class="w-1.5 h-1.5 rounded-full bg-primary/20"></div>
+<div class="w-1.5 h-1.5 rounded-full bg-primary/40"></div>
+<div class="w-1.5 h-1.5 rounded-full bg-primary/60"></div>
+</div>
+</div>
+</div>
+<!-- Right Column: Measurement Displays -->
+<div class="lg:col-span-7 space-y-8">
+<!-- Display Cards -->
+<div class="grid grid-cols-1 gap-6">
+<!-- S/N Display -->
+<div class="bg-surface-container-lowest p-8 rounded-xl shadow-sm border border-outline-variant/10">
+<p class="text-label-sm font-semibold uppercase tracking-widest text-outline mb-4">Current Serial / 현재 시리얼</p>
+<div class="flex items-end justify-between">
+<span class="text-4xl font-bold tracking-tight text-on-surface">SN-2024-0812-0042</span>
+<span class="material-symbols-outlined text-outline-variant" data-icon="tag">tag</span>
+</div>
+</div>
+<!-- Current Consumption Display -->
+<div class="bg-primary p-10 rounded-xl shadow-lg relative overflow-hidden group">
+<div class="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full -mr-20 -mt-20 blur-3xl group-hover:scale-110 transition-transform duration-700"></div>
+<p class="text-white/70 text-label-sm font-semibold uppercase tracking-widest mb-4 relative z-10">Current Consumption / 전류 소모량</p>
+<div class="flex items-baseline gap-4 relative z-10">
+<span class="text-8xl font-black tracking-tighter text-white">42.85</span>
+<span class="text-3xl font-bold text-white/60">mA</span>
+</div>
+<div class="mt-8 flex items-center gap-3 relative z-10">
+<div class="px-4 py-1.5 bg-white/10 rounded-full backdrop-blur-md border border-white/20">
+<span class="text-white font-bold text-sm tracking-widest">NORMAL</span>
+</div>
+<span class="text-white/60 text-xs italic">±0.02mA accuracy</span>
+</div>
+</div>
+</div>
+<!-- History Table Section -->
+<section class="bg-surface-container-low rounded-xl p-8">
+<div class="flex items-center justify-between mb-8">
+<div class="space-y-1">
+<h3 class="text-headline-md font-bold text-on-surface">Recent 10 Measurements</h3>
+<p class="text-label-sm text-outline font-medium">최근 10개 측정 기록</p>
+</div>
+<span class="text-label-sm bg-surface-container-high px-4 py-2 rounded-lg text-outline font-bold">LIVE FEED</span>
+</div>
+<div class="overflow-hidden">
+<table class="w-full text-left">
+<thead class="text-label-sm uppercase tracking-widest text-outline border-b border-outline-variant/20">
+<tr>
+<th class="pb-4 font-bold">Time</th>
+<th class="pb-4 font-bold">S/N</th>
+<th class="pb-4 font-bold text-right">Measured (mA)</th>
+<th class="pb-4 font-bold text-center">Result</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-outline-variant/10">
+<!-- Row 1 -->
+<tr class="group hover:bg-surface-container-lowest transition-colors">
+<td class="py-4 text-body-md text-on-surface-variant">14:22:45</td>
+<td class="py-4 text-body-md font-semibold text-on-surface">SN-2024-0812-0041</td>
+<td class="py-4 text-body-md font-mono text-right text-on-surface">41.92</td>
+<td class="py-4 text-center">
+<span class="inline-flex items-center gap-1 px-3 py-1 bg-primary/10 text-primary text-[10px] font-black rounded-full">
+<span class="material-symbols-outlined text-xs" data-icon="check_circle" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+                                            PASS
+                                        </span>
+</td>
+</tr>
+<!-- Row 2 -->
+<tr class="group hover:bg-surface-container-lowest transition-colors">
+<td class="py-4 text-body-md text-on-surface-variant">14:21:12</td>
+<td class="py-4 text-body-md font-semibold text-on-surface">SN-2024-0812-0040</td>
+<td class="py-4 text-body-md font-mono text-right text-error font-bold">68.21</td>
+<td class="py-4 text-center">
+<span class="inline-flex items-center gap-1 px-3 py-1 bg-error/10 text-error text-[10px] font-black rounded-full">
+<span class="material-symbols-outlined text-xs" data-icon="cancel" style="font-variation-settings: 'FILL' 1;">cancel</span>
+                                            FAIL
+                                        </span>
+</td>
+</tr>
+<!-- Row 3 -->
+<tr class="group hover:bg-surface-container-lowest transition-colors">
+<td class="py-4 text-body-md text-on-surface-variant">14:19:58</td>
+<td class="py-4 text-body-md font-semibold text-on-surface">SN-2024-0812-0039</td>
+<td class="py-4 text-body-md font-mono text-right text-on-surface">42.05</td>
+<td class="py-4 text-center">
+<span class="inline-flex items-center gap-1 px-3 py-1 bg-primary/10 text-primary text-[10px] font-black rounded-full">
+<span class="material-symbols-outlined text-xs" data-icon="check_circle" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+                                            PASS
+                                        </span>
+</td>
+</tr>
+<!-- Row 4 -->
+<tr class="group hover:bg-surface-container-lowest transition-colors">
+<td class="py-4 text-body-md text-on-surface-variant">14:18:30</td>
+<td class="py-4 text-body-md font-semibold text-on-surface">SN-2024-0812-0038</td>
+<td class="py-4 text-body-md font-mono text-right text-on-surface">42.11</td>
+<td class="py-4 text-center">
+<span class="inline-flex items-center gap-1 px-3 py-1 bg-primary/10 text-primary text-[10px] font-black rounded-full">
+<span class="material-symbols-outlined text-xs" data-icon="check_circle" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+                                            PASS
+                                        </span>
+</td>
+</tr>
+<!-- Row 5 -->
+<tr class="group hover:bg-surface-container-lowest transition-colors">
+<td class="py-4 text-body-md text-on-surface-variant">14:17:15</td>
+<td class="py-4 text-body-md font-semibold text-on-surface">SN-2024-0812-0037</td>
+<td class="py-4 text-body-md font-mono text-right text-on-surface">41.88</td>
+<td class="py-4 text-center">
+<span class="inline-flex items-center gap-1 px-3 py-1 bg-primary/10 text-primary text-[10px] font-black rounded-full">
+<span class="material-symbols-outlined text-xs" data-icon="check_circle" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+                                            PASS
+                                        </span>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+</div>
+</div>
+</main>
+<!-- Footer -->
+<footer class="bg-[#edeeef] fixed bottom-0 w-full flex justify-between px-8 py-2 border-t border-[#bdc8ce]/20 z-50">
+<div class="flex items-center gap-4">
+<span class="text-[11px] uppercase tracking-wider text-[#191c1d]/60 font-medium">Build v2.4.0-STABLE</span>
+<div class="h-3 w-px bg-outline-variant/30"></div>
+<a class="text-[11px] uppercase tracking-wider text-[#191c1d]/60 hover:text-[#00647c] transition-colors" href="#">System Logs</a>
+<a class="text-[11px] uppercase tracking-wider text-[#191c1d]/60 hover:text-[#00647c] transition-colors" href="#">Support</a>
+</div>
+<div class="flex items-center gap-2">
+<span class="w-1.5 h-1.5 rounded-full bg-green-500"></span>
+<span class="text-[10px] font-bold text-outline uppercase tracking-tighter">System Nominal</span>
+</div>
+</footer>
+</body></html>

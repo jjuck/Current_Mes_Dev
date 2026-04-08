@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PRECISION LAB</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand-wrap">
+        <img class="brand-logo" src="/assets/logo.png" alt="Current Measure Program logo" />
+        <div class="brand">Current Measure Program</div>
+      </div>
+      <div class="topbar-actions">
+        <span id="com-badge" class="status-pill status-pill--offline">COM DISCONNECTED</span>
+        <button id="refresh-status-button" class="icon-button" type="button" aria-label="상태 새로고침">↻</button>
+      </div>
+    </header>
+
+    <main class="dashboard-shell">
+      <section class="dashboard-grid">
+        <div class="panel-column panel-column--left">
+          <section class="input-panel">
+            <div class="section-label">SERIAL NUMBER INPUT / 시리얼 번호 입력</div>
+            <form id="measurement-form" class="scan-form">
+              <input id="qr-input" class="scan-input" type="text" autocomplete="off" spellcheck="false" placeholder="Scan QR or Enter S/N" />
+              <button class="scan-button" type="submit">SCAN</button>
+            </form>
+            <p class="micro-copy">스캔 후 Enter 시 자동 측정됩니다. 측정 후 1초 뒤 입력창이 다시 활성화됩니다.</p>
+            <p id="download-feedback" class="download-feedback">측정 완료 후 SigmaStudio 다운로드 상태가 여기에 표시됩니다.</p>
+          </section>
+
+          <section id="activity-card" class="waiting-panel">
+            <div class="waiting-symbol">⌛</div>
+            <div id="activity-title" class="waiting-title">WAITING</div>
+            <p id="activity-message" class="waiting-copy">스캔 대기 중 / Ready for next measurement</p>
+          </section>
+        </div>
+
+        <div class="panel-column panel-column--right">
+          <section class="serial-card surface-card">
+            <div class="section-label">CURRENT SERIAL / 현재 시리얼</div>
+            <div id="current-serial" class="serial-value">-</div>
+          </section>
+
+          <section id="measurement-hero" class="measurement-hero measurement-hero--idle">
+            <div class="section-label section-label--light">CURRENT CONSUMPTION / 전류 소모량</div>
+            <div class="measurement-mainline">
+              <div class="measurement-reading">
+                <span id="current-value" class="measurement-number">0.00</span>
+                <span class="measurement-unit">mA</span>
+              </div>
+              <span id="hero-result-display" class="hero-result-display">WAITING</span>
+            </div>
+            <div class="measurement-meta">
+              <span id="result-pill" class="result-pill result-pill--idle">WAITING</span>
+              <span id="process-range-text" class="measurement-annotation">공정 한계 : 0.10mA ~ 20.00mA</span>
+            </div>
+          </section>
+
+          <section class="history-card surface-card">
+            <div class="history-header">
+              <div>
+                <h2 class="history-title">Recent 10 Measurements</h2>
+                <p class="history-subtitle">최근 10개 측정 기록</p>
+              </div>
+              <span class="live-pill">LIVE FEED</span>
+            </div>
+            <div class="history-table-wrap">
+              <table class="history-table">
+                <thead>
+                  <tr>
+                    <th>TIME</th>
+                    <th>S/N</th>
+                    <th>MEASURED (mA)</th>
+                    <th>RESULT</th>
+                  </tr>
+                </thead>
+                <tbody id="recent-measurements-body"></tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer-bar">
+      <div class="footer-left">BUILD V1.0 <span class="footer-credit">provided by jwlee &amp; jjkim</span></div>
+      <div id="system-state" class="footer-right footer-right--offline">SYSTEM STANDBY</div>
+    </footer>
+
+    <script src="/app.js" defer></script>
+  </body>
+</html>

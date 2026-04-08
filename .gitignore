@@ -1,0 +1,17 @@
+.pytest_cache/
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Runtime artifacts
+logs/*.tmp
+logs/*.bak
+
+# OS / editor artifacts
+.DS_Store
+Thumbs.db
