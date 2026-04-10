@@ -1,7 +1,7 @@
 from datetime import datetime
 from decimal import Decimal
 
-from src.current_daemon.domain import CurrentReading, MeasurementRecord, MeasurementResult, MeasurementThreshold, SerialNumber
+from src.current_daemon.domain import CurrentReading, MeasurementMode, MeasurementRecord, MeasurementResult, MeasurementThreshold, SerialNumber
 
 
 def test_current_reading_formats_display_value_from_raw_current() -> None:
@@ -26,6 +26,7 @@ def test_measurement_record_serializes_result_and_display_value() -> None:
         serial_number=SerialNumber("SN-2024-0812-0042"),
         current_reading=CurrentReading(Decimal("1784"), "1784"),
         result=MeasurementResult.PASS,
+        mode=MeasurementMode.SIGMASTUDIO,
     )
 
     assert record.to_row()["current_mA"] == "17.84"

@@ -4,19 +4,30 @@ import logging
 from decimal import Decimal
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from .config import AppConfig
-from .domain import SerialNumber
+from .domain import MeasurementMode, SerialNumber
 from .serial_reader import WatanabeA7212Reader
-from .service import MeasurementExecutionError, MeasurementRecorder, build_measurement_recorder, build_measurement_threshold
+from .service import (
+    MeasurementExecutionError,
+    MeasurementRecorder,
+    MeasurementSessionCancelledError,
+    build_measurement_recorder,
+    build_measurement_threshold,
+)
 from .status_service import MeasurementStatusService
 
 
 class MeasurementRequest(BaseModel):
     qr_code: str
+    mode: MeasurementMode = MeasurementMode.SIGMASTUDIO
+
+
+class MeasurementModeRequest(BaseModel):
+    mode: MeasurementMode
 
 
 NO_CACHE_HEADERS = {
@@ -53,7 +64,7 @@ def create_web_app(
     )
 
     app = FastAPI(title="Precision Lab Measurement Station")
-    process_range_text = _build_process_range_text(config)
+    resolved_status_service.set_selected_mode(config.default_measurement_mode)
 
     @app.get("/")
     def read_index() -> FileResponse:
@@ -90,14 +101,42 @@ def create_web_app(
     def read_status() -> dict[str, object]:
         port_status = resolved_instrument_reader.probe_connection_status()
         resolved_status_service.set_com_connection(port_status.is_connected, port_status.port_name)
-        payload = resolved_status_service.build_status_payload()
-        payload["inputRefocusDelaySeconds"] = config.input_refocus_delay_seconds
-        payload["processRangeText"] = process_range_text
-        return payload
+        return _build_enriched_status_payload(config, resolved_status_service.build_status_payload())
+
+    @app.post("/api/status/mode")
+    def update_selected_mode(request: MeasurementModeRequest) -> dict[str, object]:
+        resolved_status_service.set_selected_mode(request.mode)
+        return {
+            "status": _build_enriched_status_payload(config, resolved_status_service.build_status_payload()),
+        }
+
+    @app.websocket("/ws/status")
+    async def stream_status(websocket: WebSocket) -> None:
+        await websocket.accept()
+        port_status = resolved_instrument_reader.probe_connection_status()
+        resolved_status_service.set_com_connection(port_status.is_connected, port_status.port_name)
+        subscriber_queue = resolved_status_service.register_subscriber()
+
+        try:
+            while True:
+                payload = await subscriber_queue.get()
+                await websocket.send_json(_build_enriched_status_payload(config, payload))
+        except WebSocketDisconnect:
+            return
+        finally:
+            resolved_status_service.unregister_subscriber(subscriber_queue)
 
     @app.get("/api/measurements/recent")
     def read_recent_measurements() -> dict[str, object]:
         return {"items": resolved_status_service.get_recent_measurements()}
+
+    @app.post("/api/session/cancel")
+    def cancel_session() -> dict[str, object]:
+        cancel_requested = resolved_measurement_recorder.cancel_current_session()
+        return {
+            "cancelRequested": cancel_requested,
+            "status": _build_enriched_status_payload(config, resolved_status_service.build_status_payload()),
+        }
 
     @app.post("/api/measurements")
     def create_measurement(request: MeasurementRequest) -> dict[str, object]:
@@ -107,9 +146,16 @@ def create_web_app(
 
         try:
             serial_number = SerialNumber(normalized_qr_code)
-            measurement = resolved_measurement_recorder.measure_and_log(serial_number, trigger="web_ui")
+            measurement = resolved_measurement_recorder.measure_and_log(
+                serial_number,
+                trigger="web_ui",
+                measurement_mode=request.mode,
+            )
         except ValueError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
+        except MeasurementSessionCancelledError as error:
+            application_logger.info("Measurement request cancelled: %s", error)
+            raise HTTPException(status_code=409, detail=str(error)) from error
         except MeasurementExecutionError as error:
             application_logger.exception("Measurement request failed: %s", error)
             raise HTTPException(status_code=503, detail=str(error)) from error
@@ -117,17 +163,30 @@ def create_web_app(
         return {
             "measurement": measurement.to_payload(),
             "recent": resolved_status_service.get_recent_measurements(),
-            "status": {
-                **resolved_status_service.build_status_payload(),
-                "inputRefocusDelaySeconds": config.input_refocus_delay_seconds,
-                "processRangeText": process_range_text,
-            },
+            "status": _build_enriched_status_payload(config, resolved_status_service.build_status_payload()),
         }
 
     return app
 
 
-def _build_process_range_text(config: AppConfig) -> str:
+def _build_process_range_text(config: AppConfig, measurement_mode: MeasurementMode) -> str:
     minimum_display_value = Decimal(str(config.pass_min_raw_value)) / Decimal("100")
-    maximum_display_value = Decimal(str(config.pass_max_raw_value)) / Decimal("100")
+    if measurement_mode == MeasurementMode.ANALOG:
+        maximum_raw_value = config.analog_pass_max_raw_value
+    else:
+        maximum_raw_value = config.sigmastudio_pass_max_raw_value
+
+    maximum_display_value = Decimal(str(maximum_raw_value)) / Decimal("100")
     return f"공정 한계 : {minimum_display_value:.2f}mA ~ {maximum_display_value:.2f}mA"
+
+
+def _build_enriched_status_payload(
+    config: AppConfig,
+    payload: dict[str, object],
+) -> dict[str, object]:
+    payload["inputRefocusDelaySeconds"] = config.input_refocus_delay_seconds
+    payload["processRangeText"] = _build_process_range_text(
+        config,
+        MeasurementMode(payload["selectedMode"]),
+    )
+    return payload

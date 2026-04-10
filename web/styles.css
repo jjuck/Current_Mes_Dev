@@ -71,6 +71,7 @@ body {
 .topbar-actions {
   display: flex;
   align-items: center;
+   flex-wrap: wrap;
   gap: 16px;
 }
 
@@ -107,7 +108,8 @@ body {
 }
 
 .icon-button,
-.scan-button {
+.scan-button,
+.secondary-button {
   border: none;
   cursor: pointer;
 }
@@ -160,6 +162,31 @@ body {
   letter-spacing: 0.14em;
 }
 
+.mode-select-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.mode-select-label {
+  color: var(--text-soft);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+
+.mode-select {
+  min-width: 160px;
+  height: 42px;
+  border: none;
+  border-radius: 14px;
+  padding: 0 14px;
+  background: var(--surface-container);
+  color: var(--text);
+  font-weight: 600;
+}
+
 .section-label--light {
   color: rgba(255, 255, 255, 0.72);
 }
@@ -168,6 +195,13 @@ body {
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 12px;
+}
+
+.session-control-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 14px;
 }
 
 .scan-input {
@@ -197,8 +231,25 @@ body {
   letter-spacing: 0.08em;
 }
 
+.secondary-button {
+  min-width: 120px;
+  height: 44px;
+  border-radius: 16px;
+  padding: 0 18px;
+  background: var(--surface-container);
+  color: var(--text);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.secondary-button--danger {
+  background: var(--error-soft);
+  color: var(--error);
+}
+
 .scan-input:disabled,
-.scan-button:disabled {
+.scan-button:disabled,
+.secondary-button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }
@@ -219,6 +270,28 @@ body {
   font-weight: 600;
 }
 
+.activity-meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.activity-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--primary);
+  font-size: 0.74rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
 .measurement-annotation {
   color: rgba(255, 255, 255, 0.95);
   font-weight: 600;
@@ -231,6 +304,22 @@ body {
   display: grid;
   place-items: center;
   text-align: center;
+}
+
+.waiting-panel--running {
+  background: linear-gradient(180deg, #eef7fa 0%, #dff2f7 100%);
+}
+
+.waiting-panel--success {
+  background: linear-gradient(180deg, #eef8f4 0%, #def3e8 100%);
+}
+
+.waiting-panel--warning {
+  background: linear-gradient(180deg, #fff6eb 0%, #ffe8cc 100%);
+}
+
+.waiting-panel--error {
+  background: linear-gradient(180deg, #fff0f0 0%, #ffe0e0 100%);
 }
 
 .waiting-symbol {
@@ -406,6 +495,14 @@ body {
 
   .scan-form {
     grid-template-columns: 1fr;
+  }
+
+  .session-control-row {
+    flex-direction: column;
+  }
+
+  .secondary-button {
+    width: 100%;
   }
 
   .measurement-number {

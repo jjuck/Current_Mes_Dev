@@ -89,12 +89,29 @@ class WatanabeA7212Reader:
             self._resolved_port_name = self._settings.port
             return self._resolved_port_name
 
-        available_ports = [port.device for port in comports() if port.device]
+        available_ports = [
+            port.device
+            for port in comports()
+            if port.device and self._is_auto_detectable_port(port)
+        ]
         if not available_ports:
             return None
 
         self._resolved_port_name = available_ports[0]
         return self._resolved_port_name
+
+    @staticmethod
+    def _is_auto_detectable_port(port: object) -> bool:
+        searchable_fields = (
+            getattr(port, "device", None),
+            getattr(port, "description", None),
+            getattr(port, "hwid", None),
+        )
+        return any(
+            "serial" in field.lower()
+            for field in searchable_fields
+            if isinstance(field, str) and field
+        )
 
     @staticmethod
     def _parse_response(response: bytes) -> CurrentReading:

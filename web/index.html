@@ -17,6 +17,7 @@
       </div>
       <div class="topbar-actions">
         <span id="com-badge" class="status-pill status-pill--offline">COM DISCONNECTED</span>
+        <span id="ws-badge" class="status-pill status-pill--offline">WS RECONNECTING</span>
         <button id="refresh-status-button" class="icon-button" type="button" aria-label="상태 새로고침">↻</button>
       </div>
     </header>
@@ -26,16 +27,30 @@
         <div class="panel-column panel-column--left">
           <section class="input-panel">
             <div class="section-label">SERIAL NUMBER INPUT / 시리얼 번호 입력</div>
+            <label class="mode-select-wrap" for="measurement-mode">
+              <span class="mode-select-label">MODE</span>
+              <select id="measurement-mode" class="mode-select">
+                <option value="sigmastudio">Digital</option>
+                <option value="analog">Analog</option>
+              </select>
+            </label>
             <form id="measurement-form" class="scan-form">
               <input id="qr-input" class="scan-input" type="text" autocomplete="off" spellcheck="false" placeholder="Scan QR or Enter S/N" />
               <button class="scan-button" type="submit">SCAN</button>
             </form>
-            <p class="micro-copy">스캔 후 Enter 시 자동 측정됩니다. 측정 후 1초 뒤 입력창이 다시 활성화됩니다.</p>
-            <p id="download-feedback" class="download-feedback">측정 완료 후 SigmaStudio 다운로드 상태가 여기에 표시됩니다.</p>
+            <div class="session-control-row">
+              <button id="cancel-session-button" class="secondary-button secondary-button--danger" type="button">세션 중지</button>
+              <button id="reset-session-button" class="secondary-button" type="button">초기화</button>
+            </div>
+            <p id="download-feedback" class="download-feedback">Digital 다운로드/측정 상태가 여기에 표시됩니다.</p>
           </section>
 
           <section id="activity-card" class="waiting-panel">
-            <div class="waiting-symbol">⌛</div>
+            <div class="activity-meta">
+              <span id="activity-phase" class="activity-pill">IDLE</span>
+              <span id="mode-badge" class="activity-pill">Digital</span>
+            </div>
+            <div id="activity-symbol" class="waiting-symbol">⌛</div>
             <div id="activity-title" class="waiting-title">WAITING</div>
             <p id="activity-message" class="waiting-copy">스캔 대기 중 / Ready for next measurement</p>
           </section>

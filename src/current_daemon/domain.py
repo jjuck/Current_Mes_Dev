@@ -45,6 +45,11 @@ class MeasurementResult(StrEnum):
     FAIL = "FAIL"
 
 
+class MeasurementMode(StrEnum):
+    SIGMASTUDIO = "sigmastudio"
+    ANALOG = "analog"
+
+
 @dataclass(frozen=True)
 class MeasurementThreshold:
     minimum_raw_value: Decimal
@@ -63,6 +68,7 @@ class MeasurementRecord:
     serial_number: SerialNumber
     current_reading: CurrentReading
     result: MeasurementResult
+    mode: MeasurementMode
 
     def to_row(self) -> dict[str, str]:
         return {
@@ -71,6 +77,7 @@ class MeasurementRecord:
             "raw_current": self.current_reading.as_text(),
             "current_mA": self.current_reading.as_display_text(),
             "result": self.result.value,
+            "mode": self.mode.value,
         }
 
     def to_payload(self) -> dict[str, str]:
@@ -80,4 +87,5 @@ class MeasurementRecord:
             "raw_current": self.current_reading.as_text(),
             "current_mA": self.current_reading.as_display_text(),
             "result": self.result.value,
+            "mode": self.mode.value,
         }

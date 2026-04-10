@@ -1,24 +1,38 @@
 const form = document.querySelector('#measurement-form');
 const input = document.querySelector('#qr-input');
+const measurementModeSelect = document.querySelector('#measurement-mode');
+const modeBadge = document.querySelector('#mode-badge');
+const activityPhase = document.querySelector('#activity-phase');
 const currentSerial = document.querySelector('#current-serial');
 const currentValue = document.querySelector('#current-value');
 const resultPill = document.querySelector('#result-pill');
 const measurementHero = document.querySelector('#measurement-hero');
 const heroResultDisplay = document.querySelector('#hero-result-display');
+const activitySymbol = document.querySelector('#activity-symbol');
 const activityTitle = document.querySelector('#activity-title');
 const activityMessage = document.querySelector('#activity-message');
 const downloadFeedback = document.querySelector('#download-feedback');
 const activityCard = document.querySelector('#activity-card');
 const recentMeasurementsBody = document.querySelector('#recent-measurements-body');
 const comBadge = document.querySelector('#com-badge');
+const wsBadge = document.querySelector('#ws-badge');
 const systemState = document.querySelector('#system-state');
 const refreshStatusButton = document.querySelector('#refresh-status-button');
 const processRangeText = document.querySelector('#process-range-text');
 const scanButton = document.querySelector('.scan-button');
+const cancelSessionButton = document.querySelector('#cancel-session-button');
+const resetSessionButton = document.querySelector('#reset-session-button');
 
-let inputRefocusDelayMs = 5000;
-let countdownTimer = null;
-let countdownValue = 0;
+const MODE_LABELS = {
+  sigmastudio: 'Digital',
+  analog: 'Analog',
+};
+
+let statusSocket = null;
+let socketReconnectTimer = null;
+let socketReconnectAttempts = 0;
+let lastRenderedStatus = null;
+let socketConnected = false;
 
 function escapeHtml(value) {
   return String(value)
@@ -38,58 +52,38 @@ function focusScanInput() {
   input.select();
 }
 
+function getModeLabel(mode) {
+  return MODE_LABELS[mode] || mode;
+}
+
 function setInputLocked(isLocked) {
   input.disabled = isLocked;
   scanButton.disabled = isLocked;
 }
 
-function setWaitingState() {
-  activityTitle.textContent = 'WAITING';
-  activityMessage.textContent = '스캔 대기 중 / Ready for next measurement';
+function updateSessionControls(status) {
+  const isSessionActive = Boolean(status?.sessionActive);
+  const isCancellationRequested = Boolean(status?.sessionCancellationRequested);
+  cancelSessionButton.disabled = !isSessionActive || isCancellationRequested;
 }
 
-function renderCountdown(secondsRemaining) {
-  activityTitle.textContent = 'NEXT SCAN';
-  activityMessage.textContent = `다음 스캔까지 ${secondsRemaining}초`;
+function setSocketBadge(isConnected) {
+  socketConnected = isConnected;
+  wsBadge.textContent = isConnected ? 'WS LIVE' : 'WS RECONNECTING';
+  wsBadge.className = `status-pill ${isConnected ? 'status-pill--online' : 'status-pill--offline'}`;
 }
 
-function clearCountdownTimer() {
-  window.clearInterval(countdownTimer);
-  countdownTimer = null;
-}
-
-function startInputCountdown() {
-  clearCountdownTimer();
-  countdownValue = Math.max(1, Math.round(inputRefocusDelayMs / 1000));
-  setInputLocked(true);
-  renderCountdown(countdownValue);
-
-  countdownTimer = window.setInterval(() => {
-    countdownValue -= 1;
-    if (countdownValue <= 0) {
-      clearCountdownTimer();
-      setInputLocked(false);
-      setWaitingState();
-      input.value = '';
-      focusScanInput();
-      return;
-    }
-
-    renderCountdown(countdownValue);
-  }, 1000);
-}
-
-function renderMeasurement(measurement) {
-  if (!measurement) {
+function scheduleSocketReconnect() {
+  if (socketReconnectTimer !== null) {
     return;
   }
 
-  currentSerial.textContent = measurement.qr_code;
-  currentValue.textContent = measurement.current_mA;
-  heroResultDisplay.textContent = measurement.result;
-  resultPill.textContent = measurement.result;
-  resultPill.className = `result-pill ${measurement.result === 'PASS' ? 'result-pill--pass' : 'result-pill--fail'}`;
-  measurementHero.className = `measurement-hero ${measurement.result === 'PASS' ? 'measurement-hero--pass' : 'measurement-hero--fail'}`;
+  const reconnectDelayMs = Math.min(5000, 1000 * (socketReconnectAttempts + 1));
+  socketReconnectAttempts += 1;
+  socketReconnectTimer = window.setTimeout(() => {
+    socketReconnectTimer = null;
+    connectStatusSocket();
+  }, reconnectDelayMs);
 }
 
 function renderRecentMeasurements(items) {
@@ -110,50 +104,86 @@ function renderRecentMeasurements(items) {
     .join('');
 }
 
-function renderStatus(status) {
-  inputRefocusDelayMs = (status.inputRefocusDelaySeconds || 5) * 1000;
+function renderMeasurement(status) {
+  const displayMeasurement = status.displayMeasurement || {};
+
+  currentSerial.textContent = displayMeasurement.serialNumber || '-';
+  currentValue.textContent = displayMeasurement.currentMilliampere || '0.00';
+  heroResultDisplay.textContent = displayMeasurement.resultText || 'WAITING';
+  resultPill.textContent = displayMeasurement.resultText || 'WAITING';
+  resultPill.className = `result-pill result-pill--${displayMeasurement.resultTone || 'idle'}`;
+  measurementHero.className = `measurement-hero measurement-hero--${displayMeasurement.resultTone || 'idle'}`;
+}
+
+function renderActivity(status) {
+  const activity = status.activity || {};
+  activitySymbol.textContent = activity.symbol || '⌛';
+  activityTitle.textContent = activity.title || 'WAITING';
+  activityMessage.textContent = activity.message || '스캔 대기 중 / Ready for next measurement';
+  activityPhase.textContent = activity.phaseLabel || status.phaseLabel || 'IDLE';
+  activityCard.className = `waiting-panel waiting-panel--${activity.tone || 'idle'}`;
+}
+
+function renderStatusMeta(status) {
+  measurementModeSelect.value = status.selectedMode || 'sigmastudio';
+  modeBadge.textContent = status.modeLabel || getModeLabel(status.selectedMode || 'sigmastudio');
   comBadge.textContent = status.comLabel;
   comBadge.className = `status-pill ${status.comConnected ? 'status-pill--online' : 'status-pill--offline'}`;
   systemState.textContent = status.comConnected ? 'SYSTEM NOMINAL' : 'SYSTEM CHECK REQUIRED';
   systemState.className = `footer-right ${status.comConnected ? 'footer-right--online' : 'footer-right--offline'}`;
+  setInputLocked(Boolean(status.sessionActive));
 
   if (status.processRangeText) {
     processRangeText.textContent = status.processRangeText;
   }
 
-  if (status.lastDownload && status.lastDownload.message) {
-    downloadFeedback.textContent = status.lastDownload.message;
-  }
-
-  if (status.lastMeasurement) {
-    renderMeasurement(status.lastMeasurement);
-    return;
-  }
-
-  heroResultDisplay.textContent = 'WAITING';
-  setWaitingState();
+  downloadFeedback.textContent = status.latestFeedbackMessage || '';
+  updateSessionControls(status);
 }
 
-async function fetchStatus() {
+function renderStatus(status) {
+  lastRenderedStatus = status;
+  renderStatusMeta(status);
+  renderActivity(status);
+  renderMeasurement(status);
+  renderRecentMeasurements(status.recentMeasurements || []);
+
+  if (!status.sessionActive) {
+    window.setTimeout(() => {
+      focusScanInput();
+    }, 0);
+  }
+}
+
+async function synchronizeStatus() {
   const response = await fetch('/api/status');
+  if (!response.ok) {
+    throw new Error('Status sync failed.');
+  }
+
   const status = await response.json();
   renderStatus(status);
 }
 
-async function fetchRecentMeasurements() {
-  const response = await fetch('/api/measurements/recent');
-  const payload = await response.json();
-  renderRecentMeasurements(payload.items || []);
+async function updateSelectedMode(mode) {
+  const response = await fetch('/api/status/mode', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mode }),
+  });
+
+  if (!response.ok) {
+    throw new Error('Mode update failed.');
+  }
+
+  return response.json();
 }
 
 async function submitMeasurement(qrCode) {
-  activityTitle.textContent = 'MEASURING';
-  activityMessage.textContent = '측정 진행 중 / Measurement in progress';
-
   const response = await fetch('/api/measurements', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ qr_code: qrCode }),
+    body: JSON.stringify({ qr_code: qrCode, mode: measurementModeSelect.value }),
   });
 
   if (!response.ok) {
@@ -161,10 +191,50 @@ async function submitMeasurement(qrCode) {
     throw new Error(errorPayload.detail || 'Measurement request failed.');
   }
 
-  const payload = await response.json();
-  renderMeasurement(payload.measurement);
-  renderRecentMeasurements(payload.recent || []);
-  renderStatus(payload.status || {});
+  return response.json();
+}
+
+async function requestSessionCancel() {
+  const response = await fetch('/api/session/cancel', {
+    method: 'POST',
+  });
+
+  if (!response.ok) {
+    const errorPayload = await response.json();
+    throw new Error(errorPayload.detail || 'Session cancel failed.');
+  }
+
+  return response.json();
+}
+
+function connectStatusSocket() {
+  if (statusSocket !== null) {
+    statusSocket.close();
+  }
+
+  setSocketBadge(false);
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  statusSocket = new WebSocket(`${protocol}//${window.location.host}/ws/status`);
+
+  statusSocket.addEventListener('open', () => {
+    socketReconnectAttempts = 0;
+    setSocketBadge(true);
+  });
+
+  statusSocket.addEventListener('message', (event) => {
+    const status = JSON.parse(event.data);
+    renderStatus(status);
+  });
+
+  statusSocket.addEventListener('close', () => {
+    setSocketBadge(false);
+    scheduleSocketReconnect();
+  });
+
+  statusSocket.addEventListener('error', () => {
+    setSocketBadge(false);
+    statusSocket.close();
+  });
 }
 
 form.addEventListener('submit', async (event) => {
@@ -182,28 +252,67 @@ form.addEventListener('submit', async (event) => {
   setInputLocked(true);
 
   try {
-    await submitMeasurement(qrCode);
-    startInputCountdown();
+    const payload = await submitMeasurement(qrCode);
+    input.value = '';
+    if (payload.status) {
+      renderStatus(payload.status);
+    }
   } catch (error) {
-    clearCountdownTimer();
-    activityTitle.textContent = 'ERROR';
-    activityMessage.textContent = error.message;
-    heroResultDisplay.textContent = 'FAIL';
-    resultPill.textContent = 'FAIL';
-    resultPill.className = 'result-pill result-pill--fail';
-    measurementHero.className = 'measurement-hero measurement-hero--fail';
     setInputLocked(false);
-    focusScanInput();
+    await synchronizeStatus().catch(() => {
+      activityCard.className = 'waiting-panel waiting-panel--error';
+      activityTitle.textContent = 'ERROR';
+      activityMessage.textContent = error.message;
+    });
   }
 });
 
 refreshStatusButton.addEventListener('click', async () => {
-  await fetchStatus();
+  await synchronizeStatus();
   focusScanInput();
 });
 
+cancelSessionButton.addEventListener('click', async () => {
+  try {
+    const payload = await requestSessionCancel();
+    if (payload.status) {
+      renderStatus(payload.status);
+    }
+  } catch (error) {
+    await synchronizeStatus().catch(() => console.error(error));
+  }
+});
+
+resetSessionButton.addEventListener('click', () => {
+  if (lastRenderedStatus?.sessionActive) {
+    cancelSessionButton.click();
+    return;
+  }
+
+  input.value = '';
+  if (lastRenderedStatus) {
+    renderStatus(lastRenderedStatus);
+  }
+  focusScanInput();
+});
+
+measurementModeSelect.addEventListener('change', async () => {
+  try {
+    const payload = await updateSelectedMode(measurementModeSelect.value);
+    if (payload.status) {
+      renderStatus(payload.status);
+    }
+  } catch (error) {
+    await synchronizeStatus().catch(() => console.error(error));
+  }
+});
+
 window.addEventListener('load', async () => {
-  await Promise.all([fetchStatus(), fetchRecentMeasurements()]);
-  setWaitingState();
+  connectStatusSocket();
+  await synchronizeStatus().catch(() => {
+    activityCard.className = 'waiting-panel waiting-panel--error';
+    activityTitle.textContent = 'OFFLINE';
+    activityMessage.textContent = '초기 상태를 불러오지 못했습니다.';
+  });
   focusScanInput();
 });
