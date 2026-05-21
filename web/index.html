@@ -32,17 +32,18 @@
               <select id="measurement-mode" class="mode-select">
                 <option value="sigmastudio">Digital</option>
                 <option value="analog">Analog</option>
+                <option value="ancr_mic">ANCR MIC</option>
+                <option value="ancr_sensor">ANCR Sensor</option>
               </select>
             </label>
             <form id="measurement-form" class="scan-form">
-              <input id="qr-input" class="scan-input" type="text" autocomplete="off" spellcheck="false" placeholder="Scan QR or Enter S/N" />
+              <input id="qr-input" class="scan-input" type="text" lang="en" inputmode="latin" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Scan QR or Enter S/N" />
               <button class="scan-button" type="submit">SCAN</button>
             </form>
             <div class="session-control-row">
-              <button id="cancel-session-button" class="secondary-button secondary-button--danger" type="button">세션 중지</button>
-              <button id="reset-session-button" class="secondary-button" type="button">초기화</button>
+              <button id="interrupt-session-button" class="secondary-button secondary-button--danger" type="button">인터럽트 / 재시작</button>
             </div>
-            <p id="download-feedback" class="download-feedback">Digital 다운로드/측정 상태가 여기에 표시됩니다.</p>
+            <p id="download-feedback" class="download-feedback">선택된 모드의 다운로드/측정 상태가 여기에 표시됩니다.</p>
           </section>
 
           <section id="activity-card" class="waiting-panel">
@@ -73,7 +74,7 @@
             </div>
             <div class="measurement-meta">
               <span id="result-pill" class="result-pill result-pill--idle">WAITING</span>
-              <span id="process-range-text" class="measurement-annotation">공정 한계 : 0.10mA ~ 20.00mA</span>
+              <span id="process-range-text" class="measurement-annotation">공정 한계 : 0.10mA ~ 25.00mA</span>
             </div>
           </section>
 

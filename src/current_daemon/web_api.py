@@ -10,13 +10,14 @@ from pydantic import BaseModel
 
 from .config import AppConfig
 from .domain import MeasurementMode, SerialNumber
+from .input_locale import ScanInputController, WindowsEnglishInputController
 from .serial_reader import WatanabeA7212Reader
 from .service import (
     MeasurementExecutionError,
     MeasurementRecorder,
     MeasurementSessionCancelledError,
     build_measurement_recorder,
-    build_measurement_threshold,
+    build_threshold_by_mode,
 )
 from .status_service import MeasurementStatusService
 
@@ -44,16 +45,19 @@ def create_web_app(
     status_service: MeasurementStatusService | None = None,
     instrument_reader: WatanabeA7212Reader | None = None,
     web_root: Path | None = None,
+    scan_input_controller: ScanInputController | None = None,
 ) -> FastAPI:
     project_root = Path(__file__).resolve().parents[2]
     resolved_web_root = web_root or project_root / "web"
-    measurement_threshold = build_measurement_threshold(config)
+    threshold_by_mode = build_threshold_by_mode(config)
     resolved_instrument_reader = instrument_reader or WatanabeA7212Reader(config.serial_settings)
     resolved_status_service = status_service or MeasurementStatusService(
         log_csv_path=config.log_csv_path,
         log_encoding=config.log_encoding,
-        measurement_threshold=measurement_threshold,
+        measurement_threshold_by_mode=threshold_by_mode,
+        measurement_mode_specs=config.measurement_mode_specs,
         recent_limit=config.recent_measurement_limit,
+        default_measurement_mode=config.default_measurement_mode,
         legacy_log_csv_path=config.legacy_log_csv_path,
     )
     resolved_measurement_recorder = measurement_recorder or build_measurement_recorder(
@@ -62,6 +66,7 @@ def create_web_app(
         status_service=resolved_status_service,
         instrument_reader=resolved_instrument_reader,
     )
+    resolved_scan_input_controller = scan_input_controller or WindowsEnglishInputController()
 
     app = FastAPI(title="Precision Lab Measurement Station")
     resolved_status_service.set_selected_mode(config.default_measurement_mode)
@@ -138,6 +143,19 @@ def create_web_app(
             "status": _build_enriched_status_payload(config, resolved_status_service.build_status_payload()),
         }
 
+    @app.post("/api/session/interrupt-reset")
+    def interrupt_and_reset_session() -> dict[str, object]:
+        interrupted_active_session = resolved_measurement_recorder.interrupt_and_reset_current_session()
+        return {
+            "interruptedActiveSession": interrupted_active_session,
+            "status": _build_enriched_status_payload(config, resolved_status_service.build_status_payload()),
+        }
+
+    @app.post("/api/input/english-mode")
+    def ensure_english_input_mode() -> dict[str, object]:
+        result = resolved_scan_input_controller.ensure_english_input_mode()
+        return result.to_payload()
+
     @app.post("/api/measurements")
     def create_measurement(request: MeasurementRequest) -> dict[str, object]:
         normalized_qr_code = request.qr_code.strip()
@@ -171,11 +189,7 @@ def create_web_app(
 
 def _build_process_range_text(config: AppConfig, measurement_mode: MeasurementMode) -> str:
     minimum_display_value = Decimal(str(config.pass_min_raw_value)) / Decimal("100")
-    if measurement_mode == MeasurementMode.ANALOG:
-        maximum_raw_value = config.analog_pass_max_raw_value
-    else:
-        maximum_raw_value = config.sigmastudio_pass_max_raw_value
-
+    maximum_raw_value = config.measurement_mode_specs[measurement_mode].maximum_raw_value
     maximum_display_value = Decimal(str(maximum_raw_value)) / Decimal("100")
     return f"공정 한계 : {minimum_display_value:.2f}mA ~ {maximum_display_value:.2f}mA"
 
@@ -187,6 +201,6 @@ def _build_enriched_status_payload(
     payload["inputRefocusDelaySeconds"] = config.input_refocus_delay_seconds
     payload["processRangeText"] = _build_process_range_text(
         config,
-        MeasurementMode(payload["selectedMode"]),
+        MeasurementMode.from_value(payload["selectedMode"]),
     )
     return payload

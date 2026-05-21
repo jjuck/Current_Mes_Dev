@@ -6,8 +6,9 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from src.current_daemon.config import AppConfig, SerialSettings
+from src.current_daemon.config import AppConfig, SerialSettings, build_measurement_mode_specs
 from src.current_daemon.domain import CurrentReading, MeasurementMode, MeasurementRecord, MeasurementResult, SerialNumber
+from src.current_daemon.input_locale import InputLocaleSwitchResult
 from src.current_daemon.service import MeasurementExecutionError
 from src.current_daemon.web_api import create_web_app
 
@@ -18,12 +19,15 @@ class FakeMeasurementRecorder:
         record: MeasurementRecord | None = None,
         should_fail: bool = False,
         cancel_handler=None,
+        interrupt_handler=None,
     ) -> None:
         self._record = record
         self._should_fail = should_fail
         self._cancel_handler = cancel_handler
+        self._interrupt_handler = interrupt_handler
         self.calls = []
         self.cancel_calls = 0
+        self.interrupt_calls = 0
 
     def measure_and_log(self, serial_number: SerialNumber, trigger: str, measurement_mode=None) -> MeasurementRecord:
         self.calls.append((serial_number.as_text(), trigger, measurement_mode))
@@ -39,6 +43,13 @@ class FakeMeasurementRecorder:
 
         return True
 
+    def interrupt_and_reset_current_session(self) -> bool:
+        self.interrupt_calls += 1
+        if self._interrupt_handler is not None:
+            return self._interrupt_handler()
+
+        return False
+
 
 class FakeStatusService:
     def __init__(self) -> None:
@@ -52,13 +63,18 @@ class FakeStatusService:
         self.phase = "idle"
         self.remaining_seconds = None
         self.current_serial = None
+        self.retain_last_measurement = True
         self._subscribers = []
 
     def get_recent_measurements(self):
         return self.items
 
     def _mode_label(self) -> str:
-        return "Analog" if self.selected_mode == MeasurementMode.ANALOG.value else "Digital"
+        return MeasurementMode.from_value(self.selected_mode).display_name
+
+    def _mode_spec_payload(self, mode: MeasurementMode) -> dict[str, object]:
+        mode_spec = build_measurement_mode_specs()[mode]
+        return mode_spec.to_payload(mode, Decimal("10"))
 
     def _idle_feedback(self) -> str:
         if self.selected_mode == MeasurementMode.ANALOG.value:
@@ -76,15 +92,16 @@ class FakeStatusService:
         self._broadcast()
 
     def set_selected_mode(self, mode) -> None:
-        self.selected_mode = str(mode)
+        self.selected_mode = MeasurementMode.from_value(mode).value
         self._broadcast()
 
     def begin_session(self, mode, serial_number=None) -> None:
-        self.selected_mode = str(mode)
+        self.selected_mode = MeasurementMode.from_value(mode).value
         self.session_active = True
         self.session_cancellation_requested = False
         self.phase = "waiting_for_trigger"
         self.current_serial = serial_number.as_text() if serial_number is not None else None
+        self.retain_last_measurement = True
         self._broadcast()
 
     def finish_session(self) -> None:
@@ -100,6 +117,17 @@ class FakeStatusService:
         self._broadcast()
         return True
 
+    def interrupt_and_reset_session(self) -> bool:
+        had_active_session = self.session_active
+        self.session_active = False
+        self.session_cancellation_requested = False
+        self.phase = "idle"
+        self.remaining_seconds = None
+        self.current_serial = None
+        self.retain_last_measurement = False
+        self._broadcast()
+        return had_active_session
+
     def register_subscriber(self):
         queue = asyncio.Queue()
         loop = asyncio.get_running_loop()
@@ -111,6 +139,8 @@ class FakeStatusService:
         self._subscribers = [subscriber for subscriber in self._subscribers if subscriber[1] is not queue]
 
     def build_status_payload(self):
+        resolved_mode = MeasurementMode.from_value(self.selected_mode)
+        mode_spec = build_measurement_mode_specs()[resolved_mode]
         latest_feedback_message = self._idle_feedback()
         feedback_messages = []
         if self.last_download and self.last_download.get("message"):
@@ -125,12 +155,21 @@ class FakeStatusService:
             "lastDownload": self.last_download,
             "recentMeasurements": self.items,
             "selectedMode": self.selected_mode,
+            "selectedModeLabel": mode_spec.display_name,
+            "selectedModeFamily": mode_spec.family.value,
+            "selectedModeRequiresDownload": mode_spec.requires_download,
+            "selectedModeDelaySeconds": mode_spec.measurement_delay_seconds,
+            "selectedModeCalculationFactor": format(mode_spec.calculation_factor, "f"),
+            "availableModes": [
+                self._mode_spec_payload(mode)
+                for mode in build_measurement_mode_specs()
+            ],
             "modeLabel": self._mode_label(),
             "phase": self.phase,
             "phaseLabel": self.phase.replace("_", " ").upper(),
             "remainingSeconds": self.remaining_seconds,
             "currentSerial": self.current_serial,
-            "retainLastMeasurement": True,
+            "retainLastMeasurement": self.retain_last_measurement,
             "sessionActive": self.session_active,
             "sessionCancellationRequested": self.session_cancellation_requested,
             "lastError": None,
@@ -146,10 +185,10 @@ class FakeStatusService:
                 "phaseLabel": self.phase.replace("_", " ").upper(),
             },
             "displayMeasurement": {
-                "serialNumber": self.current_serial or (self.last_measurement["qr_code"] if self.last_measurement else "-"),
-                "currentMilliampere": self.last_measurement["current_mA"] if self.last_measurement else "0.00",
-                "resultText": self.last_measurement["result"] if self.last_measurement else "WAITING",
-                "resultTone": "pass" if self.last_measurement and self.last_measurement["result"] == "PASS" else ("fail" if self.last_measurement else "idle"),
+                "serialNumber": self.current_serial or (self.last_measurement["qr_code"] if self.last_measurement and self.retain_last_measurement else "-"),
+                "currentMilliampere": self.last_measurement["current_mA"] if self.last_measurement and self.retain_last_measurement else "0.00",
+                "resultText": self.last_measurement["result"] if self.last_measurement and self.retain_last_measurement else "WAITING",
+                "resultTone": "pass" if self.last_measurement and self.retain_last_measurement and self.last_measurement["result"] == "PASS" else ("fail" if self.last_measurement and self.retain_last_measurement else "idle"),
             },
         }
 
@@ -171,6 +210,22 @@ class FakeInstrumentReader:
         return Status(self._connected, self._port_name)
 
 
+class FakeScanInputController:
+    def __init__(self, result: InputLocaleSwitchResult | None = None) -> None:
+        self.result = result or InputLocaleSwitchResult(
+            requested=True,
+            applied=True,
+            layout="00000409",
+            detail="Requested the English keyboard layout for the active window.",
+            foreground_window_handle=100,
+        )
+        self.calls = 0
+
+    def ensure_english_input_mode(self) -> InputLocaleSwitchResult:
+        self.calls += 1
+        return self.result
+
+
 def build_config(tmp_path: Path) -> AppConfig:
     return AppConfig(
         log_csv_path=tmp_path / "logs" / "current_measurement_log.csv",
@@ -180,15 +235,12 @@ def build_config(tmp_path: Path) -> AppConfig:
         web_host="127.0.0.1",
         web_port=8000,
         pass_min_raw_value=10,
-        sigmastudio_pass_max_raw_value=2000,
-        analog_pass_max_raw_value=1000,
+        measurement_mode_specs=build_measurement_mode_specs(),
         download_trigger_raw_value=100,
         download_trigger_confirm_count=3,
         trigger_poll_interval_seconds=0.2,
         recent_measurement_limit=10,
         input_refocus_delay_seconds=1,
-        sigmastudio_measurement_delay_seconds=8,
-        analog_measurement_delay_seconds=1,
         legacy_log_csv_path=tmp_path / "current_measurement_log.csv",
         logo_asset_path=tmp_path / "web" / "assets" / "logo.png",
         sigma_studio_dll_path=tmp_path / "Analog.SigmaStudioServer.dll",
@@ -269,8 +321,9 @@ def test_status_endpoint_reports_com_connection_and_refocus_delay(tmp_path: Path
     assert response.json()["comConnected"] is True
     assert response.json()["comLabel"] == "COM4 CONNECTED"
     assert response.json()["selectedMode"] == "sigmastudio"
+    assert response.json()["selectedModeLabel"] == "Digital"
     assert response.json()["inputRefocusDelaySeconds"] == 1
-    assert response.json()["processRangeText"] == "공정 한계 : 0.10mA ~ 20.00mA"
+    assert response.json()["processRangeText"] == "공정 한계 : 0.10mA ~ 25.00mA"
 
 
 def test_measurement_response_includes_download_feedback_from_status(tmp_path: Path) -> None:
@@ -305,8 +358,31 @@ def test_measurement_response_includes_download_feedback_from_status(tmp_path: P
     assert response.status_code == 200
     assert "status" in response.json()
     assert response.json()["status"]["inputRefocusDelaySeconds"] == 1
-    assert response.json()["status"]["processRangeText"] == "공정 한계 : 0.10mA ~ 20.00mA"
+    assert response.json()["status"]["processRangeText"] == "공정 한계 : 0.10mA ~ 25.00mA"
     assert response.json()["status"]["latestFeedbackMessage"] == "✅ 다운로드 완료"
+
+
+def test_english_input_mode_endpoint_requests_switch_before_scan(tmp_path: Path) -> None:
+    fake_scan_input_controller = FakeScanInputController()
+    app = create_web_app(
+        config=build_config(tmp_path),
+        application_logger=logging.getLogger("test.web_api.input_locale"),
+        measurement_recorder=FakeMeasurementRecorder(),
+        status_service=FakeStatusService(),
+        instrument_reader=FakeInstrumentReader(connected=True),
+        web_root=build_web_root(tmp_path),
+        scan_input_controller=fake_scan_input_controller,
+    )
+    client = TestClient(app)
+
+    response = client.post("/api/input/english-mode")
+
+    assert response.status_code == 200
+    assert fake_scan_input_controller.calls == 1
+    assert response.json()["requested"] is True
+    assert response.json()["applied"] is True
+    assert response.json()["layout"] == "00000409"
+    assert response.json()["foregroundWindowHandle"] == 100
 
 
 def test_measurement_endpoint_accepts_analog_mode_and_returns_analog_range_text(tmp_path: Path) -> None:
@@ -340,6 +416,72 @@ def test_measurement_endpoint_accepts_analog_mode_and_returns_analog_range_text(
     assert response.json()["status"]["processRangeText"] == "공정 한계 : 0.10mA ~ 10.00mA"
 
 
+def test_measurement_endpoint_accepts_ancr_mic_mode_and_returns_mic_range_text(tmp_path: Path) -> None:
+    measurement_record = MeasurementRecord(
+        measured_at=datetime(2026, 4, 1, 10, 0, 0),
+        serial_number=SerialNumber("SN-ANCR-MIC"),
+        current_reading=CurrentReading(Decimal("1900"), "1900"),
+        result=MeasurementResult.PASS,
+        mode=MeasurementMode.ANCR_MIC,
+    )
+    fake_status_service = FakeStatusService()
+    fake_status_service.items = [measurement_record.to_payload()]
+    fake_status_service.last_measurement = measurement_record.to_payload()
+    fake_status_service.selected_mode = MeasurementMode.ANCR_MIC.value
+    measurement_recorder = FakeMeasurementRecorder(record=measurement_record)
+    app = create_web_app(
+        config=build_config(tmp_path),
+        application_logger=logging.getLogger("test.web_api.ancr_mic"),
+        measurement_recorder=measurement_recorder,
+        status_service=fake_status_service,
+        instrument_reader=FakeInstrumentReader(connected=True),
+        web_root=build_web_root(tmp_path),
+    )
+    fake_status_service.selected_mode = MeasurementMode.ANCR_MIC.value
+    client = TestClient(app)
+
+    response = client.post("/api/measurements", json={"qr_code": "SN-ANCR-MIC", "mode": "ancr_mic"})
+
+    assert response.status_code == 200
+    assert measurement_recorder.calls[0][2] == MeasurementMode.ANCR_MIC
+    assert response.json()["measurement"]["mode"] == "ANCR MIC"
+    assert response.json()["status"]["processRangeText"] == "공정 한계 : 0.10mA ~ 19.00mA"
+
+
+def test_measurement_endpoint_accepts_ancr_sensor_mode_and_returns_half_scaled_payload(tmp_path: Path) -> None:
+    measurement_record = MeasurementRecord(
+        measured_at=datetime(2026, 4, 1, 10, 0, 0),
+        serial_number=SerialNumber("SN-ANCR-SENSOR"),
+        current_reading=CurrentReading(Decimal("5000"), "5000"),
+        result=MeasurementResult.PASS,
+        mode=MeasurementMode.ANCR_SENSOR,
+        calculation_factor=Decimal("0.5"),
+    )
+    fake_status_service = FakeStatusService()
+    fake_status_service.items = [measurement_record.to_payload()]
+    fake_status_service.last_measurement = measurement_record.to_payload()
+    fake_status_service.selected_mode = MeasurementMode.ANCR_SENSOR.value
+    measurement_recorder = FakeMeasurementRecorder(record=measurement_record)
+    app = create_web_app(
+        config=build_config(tmp_path),
+        application_logger=logging.getLogger("test.web_api.ancr_sensor"),
+        measurement_recorder=measurement_recorder,
+        status_service=fake_status_service,
+        instrument_reader=FakeInstrumentReader(connected=True),
+        web_root=build_web_root(tmp_path),
+    )
+    fake_status_service.selected_mode = MeasurementMode.ANCR_SENSOR.value
+    client = TestClient(app)
+
+    response = client.post("/api/measurements", json={"qr_code": "SN-ANCR-SENSOR", "mode": "ancr_sensor"})
+
+    assert response.status_code == 200
+    assert measurement_recorder.calls[0][2] == MeasurementMode.ANCR_SENSOR
+    assert response.json()["measurement"]["current_mA"] == "25.00"
+    assert response.json()["measurement"]["mode"] == "ANCR Sensor"
+    assert response.json()["status"]["processRangeText"] == "공정 한계 : 0.10mA ~ 25.00mA"
+
+
 def test_mode_update_endpoint_updates_selected_mode_and_returns_status(tmp_path: Path) -> None:
     fake_status_service = FakeStatusService()
     app = create_web_app(
@@ -357,6 +499,7 @@ def test_mode_update_endpoint_updates_selected_mode_and_returns_status(tmp_path:
     assert response.status_code == 200
     assert fake_status_service.selected_mode == MeasurementMode.ANALOG.value
     assert response.json()["status"]["processRangeText"] == "공정 한계 : 0.10mA ~ 10.00mA"
+    assert response.json()["status"]["availableModes"][2]["label"] == "ANCR MIC"
 
 
 def test_cancel_session_endpoint_requests_cancellation_and_returns_status(tmp_path: Path) -> None:
@@ -391,6 +534,33 @@ def test_cancel_session_endpoint_requests_cancellation_and_returns_status(tmp_pa
     assert response.json()["status"]["sessionCancellationRequested"] is True
 
 
+def test_interrupt_reset_endpoint_returns_input_ready_status(tmp_path: Path) -> None:
+    fake_status_service = FakeStatusService()
+    fake_status_service.begin_session(MeasurementMode.SIGMASTUDIO, SerialNumber("SN-RESET"))
+    measurement_recorder = FakeMeasurementRecorder(
+        interrupt_handler=fake_status_service.interrupt_and_reset_session,
+    )
+    app = create_web_app(
+        config=build_config(tmp_path),
+        application_logger=logging.getLogger("test.web_api.interrupt_reset"),
+        measurement_recorder=measurement_recorder,
+        status_service=fake_status_service,
+        instrument_reader=FakeInstrumentReader(connected=True),
+        web_root=build_web_root(tmp_path),
+    )
+    client = TestClient(app)
+
+    response = client.post("/api/session/interrupt-reset")
+
+    assert response.status_code == 200
+    assert measurement_recorder.interrupt_calls == 1
+    assert response.json()["interruptedActiveSession"] is True
+    assert response.json()["status"]["phase"] == "idle"
+    assert response.json()["status"]["sessionActive"] is False
+    assert response.json()["status"]["currentSerial"] is None
+    assert response.json()["status"]["displayMeasurement"]["resultText"] == "WAITING"
+
+
 def test_status_websocket_sends_initial_status_and_broadcast_updates(tmp_path: Path) -> None:
     fake_status_service = FakeStatusService()
     app = create_web_app(
@@ -416,14 +586,17 @@ def test_status_websocket_sends_initial_status_and_broadcast_updates(tmp_path: P
         assert updated_payload["currentSerial"] == "SN-WS"
 
 
-def test_web_assets_include_cancel_controls_and_reset_flow() -> None:
+def test_web_assets_include_interrupt_reset_control_flow() -> None:
     index_html = Path("web/index.html").read_text(encoding="utf-8")
     script = Path("web/app.js").read_text(encoding="utf-8")
 
-    assert 'id="cancel-session-button"' in index_html
-    assert 'id="reset-session-button"' in index_html
+    assert 'id="interrupt-session-button"' in index_html
+    assert 'id="cancel-session-button"' not in index_html
+    assert 'id="reset-session-button"' not in index_html
     assert 'id="ws-badge"' in index_html
-    assert "/api/session/cancel" in script
+    assert 'inputmode="latin"' in index_html
+    assert "/api/session/interrupt-reset" in script
+    assert "/api/input/english-mode" in script
     assert "/ws/status" in script
     assert "connectStatusSocket" in script
     assert "/api/status/mode" in script

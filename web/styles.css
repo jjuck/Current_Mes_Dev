@@ -54,12 +54,14 @@ body {
 .brand-wrap {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 18px;
 }
 
 .brand-logo {
-  width: 60px;
-  height: 60px;
+  width: 132px;
+  height: auto;
+  flex-shrink: 0;
+  display: block;
   object-fit: contain;
 }
 
@@ -164,8 +166,9 @@ body {
 
 .mode-select-wrap {
   display: flex;
-  align-items: center;
-  gap: 10px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
   margin-bottom: 14px;
 }
 
@@ -177,7 +180,8 @@ body {
 }
 
 .mode-select {
-  min-width: 160px;
+  width: min(100%, 280px);
+  min-width: 220px;
   height: 42px;
   border: none;
   border-radius: 14px;
@@ -497,12 +501,22 @@ body {
     grid-template-columns: 1fr;
   }
 
+  .mode-select {
+    min-width: 0;
+    width: 100%;
+  }
+
   .session-control-row {
     flex-direction: column;
   }
 
   .secondary-button {
     width: 100%;
+  }
+
+  .brand-logo {
+    width: 104px;
+    height: auto;
   }
 
   .measurement-number {

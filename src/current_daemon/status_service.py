@@ -10,7 +10,7 @@ from pathlib import Path
 from threading import Lock
 import time
 
-from .domain import CurrentReading, MeasurementMode, MeasurementRecord, MeasurementThreshold, SerialNumber
+from .domain import CurrentReading, MeasurementMode, MeasurementModeSpec, MeasurementRecord, MeasurementThreshold, SerialNumber
 
 
 class SessionPhase(StrEnum):
@@ -57,6 +57,7 @@ class MeasurementSessionState:
     last_error: str | None = None
     download_step: SessionStepState = SessionStepState()
     measurement_step: SessionStepState = SessionStepState()
+    session_token: int = 0
 
 
 @dataclass(frozen=True)
@@ -70,19 +71,24 @@ class MeasurementStatusService:
         self,
         log_csv_path: Path,
         log_encoding: str,
-        measurement_threshold: MeasurementThreshold,
+        measurement_threshold_by_mode: dict[MeasurementMode, MeasurementThreshold],
+        measurement_mode_specs: dict[MeasurementMode, MeasurementModeSpec],
         recent_limit: int,
+        default_measurement_mode: MeasurementMode = MeasurementMode.SIGMASTUDIO,
         legacy_log_csv_path: Path | None = None,
     ) -> None:
         self._log_csv_path = log_csv_path
         self._log_encoding = log_encoding
-        self._measurement_threshold = measurement_threshold
+        self._measurement_threshold_by_mode = measurement_threshold_by_mode
+        self._measurement_mode_specs = measurement_mode_specs
+        self._default_measurement_mode = default_measurement_mode
+        self._minimum_raw_value = next(iter(measurement_threshold_by_mode.values())).minimum_raw_value
         self._recent_measurements: deque[dict[str, str]] = deque(maxlen=recent_limit)
         self._last_measurement: dict[str, str] | None = None
         self._last_download: dict[str, object] | None = None
         self._com_connected = False
         self._com_port_name: str | None = None
-        self._session_state = MeasurementSessionState()
+        self._session_state = MeasurementSessionState(mode=default_measurement_mode)
         self._legacy_log_csv_path = legacy_log_csv_path
         self._subscribers: list[StatusSubscriber] = []
         self._lock = Lock()
@@ -103,9 +109,25 @@ class MeasurementStatusService:
         with self._lock:
             self._subscribers = [subscriber for subscriber in self._subscribers if subscriber.queue is not queue]
 
-    def record_measurement(self, record: MeasurementRecord) -> None:
-        payload = record.to_payload()
+    def record_measurement(self, record: MeasurementRecord, session_token: int | None = None) -> None:
+        payload = self._normalize_row(
+            {
+                "measured_at": record.measured_at.isoformat(timespec="seconds"),
+                "qr_code": record.serial_number.as_text(),
+                "SN": record.serial_number.as_text(),
+                "type": record.mode.display_name,
+                "mode": record.mode.value,
+                "spec": record.spec_text,
+                "Vop": record.vop_text,
+                "raw_current": record.current_reading.as_text(),
+                "current_mA": record.current_reading.as_display_text(record.calculation_factor),
+                "result": record.result.value,
+            }
+        )
         with self._lock:
+            if not self._matches_session_locked(session_token):
+                return
+
             self._recent_measurements.append(payload)
             self._last_measurement = payload
             self._session_state = replace(
@@ -153,15 +175,18 @@ class MeasurementStatusService:
 
         self._broadcast(payload_to_publish, subscribers)
 
-    def begin_session(self, mode: MeasurementMode | str, serial_number: SerialNumber | str | None = None) -> None:
+    def begin_session(self, mode: MeasurementMode | str, serial_number: SerialNumber | str | None = None) -> int:
         resolved_mode = self._resolve_mode(mode)
         serial_text = self._normalize_serial(serial_number)
         download_step = SessionStepState(
-            status=SessionStepStatus.SKIPPED if resolved_mode == MeasurementMode.ANALOG else SessionStepStatus.IDLE,
+            status=SessionStepStatus.SKIPPED
+            if not self._measurement_mode_specs[resolved_mode].requires_download
+            else SessionStepStatus.IDLE,
             message=None,
         )
 
         with self._lock:
+            next_session_token = self._session_state.session_token + 1
             self._session_state = MeasurementSessionState(
                 phase=SessionPhase.WAITING_FOR_TRIGGER,
                 mode=resolved_mode,
@@ -174,15 +199,24 @@ class MeasurementStatusService:
                 last_error=None,
                 download_step=download_step,
                 measurement_step=SessionStepState(),
+                session_token=next_session_token,
             )
             self._last_download = None
             payload_to_publish, subscribers = self._snapshot_locked()
 
         self._broadcast(payload_to_publish, subscribers)
+        return next_session_token
 
-    def mark_waiting_for_trigger(self, serial_number: SerialNumber | str | None = None) -> None:
+    def mark_waiting_for_trigger(
+        self,
+        serial_number: SerialNumber | str | None = None,
+        session_token: int | None = None,
+    ) -> None:
         serial_text = self._normalize_serial(serial_number)
         with self._lock:
+            if not self._matches_session_locked(session_token):
+                return
+
             self._session_state = replace(
                 self._session_state,
                 phase=SessionPhase.WAITING_FOR_TRIGGER,
@@ -196,8 +230,11 @@ class MeasurementStatusService:
 
         self._broadcast(payload_to_publish, subscribers)
 
-    def mark_download_started(self) -> None:
+    def mark_download_started(self, session_token: int | None = None) -> None:
         with self._lock:
+            if not self._matches_session_locked(session_token):
+                return
+
             self._session_state = replace(
                 self._session_state,
                 phase=SessionPhase.DOWNLOADING,
@@ -211,9 +248,17 @@ class MeasurementStatusService:
 
         self._broadcast(payload_to_publish, subscribers)
 
-    def mark_download_completed(self, message: str = "✅ 다운로드 완료", mode: str | None = None) -> None:
-        resolved_mode = mode or self._session_state.mode.value
+    def mark_download_completed(
+        self,
+        message: str = "✅ 다운로드 완료",
+        mode: str | None = None,
+        session_token: int | None = None,
+    ) -> None:
         with self._lock:
+            if not self._matches_session_locked(session_token):
+                return
+
+            resolved_mode = mode or self._session_state.mode.value
             self._last_download = {
                 "success": True,
                 "message": message,
@@ -232,9 +277,17 @@ class MeasurementStatusService:
 
         self._broadcast(payload_to_publish, subscribers)
 
-    def mark_download_failed(self, message: str = "⚠ 다운로드 실패", mode: str | None = None) -> None:
-        resolved_mode = mode or self._session_state.mode.value
+    def mark_download_failed(
+        self,
+        message: str = "⚠ 다운로드 실패",
+        mode: str | None = None,
+        session_token: int | None = None,
+    ) -> None:
         with self._lock:
+            if not self._matches_session_locked(session_token):
+                return
+
+            resolved_mode = mode or self._session_state.mode.value
             self._last_download = {
                 "success": False,
                 "message": message,
@@ -258,8 +311,11 @@ class MeasurementStatusService:
 
         self._broadcast(payload_to_publish, subscribers)
 
-    def mark_download_skipped(self) -> None:
+    def mark_download_skipped(self, session_token: int | None = None) -> None:
         with self._lock:
+            if not self._matches_session_locked(session_token):
+                return
+
             self._last_download = {
                 "success": True,
                 "message": None,
@@ -274,8 +330,11 @@ class MeasurementStatusService:
 
         self._broadcast(payload_to_publish, subscribers)
 
-    def mark_measurement_delay_started(self, remaining_seconds: int) -> None:
+    def mark_measurement_delay_started(self, remaining_seconds: int, session_token: int | None = None) -> None:
         with self._lock:
+            if not self._matches_session_locked(session_token):
+                return
+
             self._session_state = replace(
                 self._session_state,
                 phase=SessionPhase.WAITING_FOR_MEASUREMENT,
@@ -289,9 +348,12 @@ class MeasurementStatusService:
 
         self._broadcast(payload_to_publish, subscribers)
 
-    def update_measurement_delay(self, remaining_seconds: int) -> None:
+    def update_measurement_delay(self, remaining_seconds: int, session_token: int | None = None) -> None:
         normalized_remaining_seconds = max(0, int(remaining_seconds))
         with self._lock:
+            if not self._matches_session_locked(session_token):
+                return
+
             if self._session_state.remaining_seconds == normalized_remaining_seconds:
                 return
 
@@ -304,8 +366,11 @@ class MeasurementStatusService:
 
         self._broadcast(payload_to_publish, subscribers)
 
-    def mark_measurement_started(self) -> None:
+    def mark_measurement_started(self, session_token: int | None = None) -> None:
         with self._lock:
+            if not self._matches_session_locked(session_token):
+                return
+
             self._session_state = replace(
                 self._session_state,
                 phase=SessionPhase.MEASURING,
@@ -319,8 +384,11 @@ class MeasurementStatusService:
 
         self._broadcast(payload_to_publish, subscribers)
 
-    def finish_session(self) -> None:
+    def finish_session(self, session_token: int | None = None) -> None:
         with self._lock:
+            if not self._matches_session_locked(session_token):
+                return
+
             resolved_phase = self._session_state.phase
             if resolved_phase in {
                 SessionPhase.WAITING_FOR_TRIGGER,
@@ -356,8 +424,38 @@ class MeasurementStatusService:
         self._broadcast(payload_to_publish, subscribers)
         return True
 
-    def mark_session_cancelled(self, message: str = "측정이 취소되었습니다.") -> None:
+    def interrupt_and_reset_session(self) -> bool:
         with self._lock:
+            had_active_session = self._session_state.active
+            next_session_token = self._session_state.session_token + 1
+            self._session_state = replace(
+                self._session_state,
+                phase=SessionPhase.IDLE,
+                active=False,
+                cancellation_requested=False,
+                remaining_seconds=None,
+                current_serial=None,
+                retain_last_measurement=False,
+                clear_feedback_at=None,
+                last_error=None,
+                download_step=SessionStepState(),
+                measurement_step=SessionStepState(),
+                session_token=next_session_token,
+            )
+            payload_to_publish, subscribers = self._snapshot_locked()
+
+        self._broadcast(payload_to_publish, subscribers)
+        return had_active_session
+
+    def mark_session_cancelled(
+        self,
+        message: str = "측정이 취소되었습니다.",
+        session_token: int | None = None,
+    ) -> None:
+        with self._lock:
+            if not self._matches_session_locked(session_token):
+                return
+
             self._session_state = replace(
                 self._session_state,
                 phase=SessionPhase.CANCELLED,
@@ -371,8 +469,11 @@ class MeasurementStatusService:
 
         self._broadcast(payload_to_publish, subscribers)
 
-    def mark_error(self, message: str) -> None:
+    def mark_error(self, message: str, session_token: int | None = None) -> None:
         with self._lock:
+            if not self._matches_session_locked(session_token):
+                return
+
             self._session_state = replace(
                 self._session_state,
                 phase=SessionPhase.ERROR,
@@ -386,8 +487,11 @@ class MeasurementStatusService:
 
         self._broadcast(payload_to_publish, subscribers)
 
-    def is_session_cancel_requested(self) -> bool:
+    def is_session_cancel_requested(self, session_token: int | None = None) -> bool:
         with self._lock:
+            if not self._matches_session_locked(session_token):
+                return True
+
             return self._session_state.cancellation_requested
 
     def build_status_payload(self) -> dict[str, object]:
@@ -399,6 +503,7 @@ class MeasurementStatusService:
         self._session_state = state
         feedback_messages = self._build_feedback_messages_locked()
         latest_feedback_message = feedback_messages[-1] if feedback_messages else self._build_idle_feedback_message(state.mode)
+        mode_spec = self._measurement_mode_specs[state.mode]
 
         if self._com_port_name:
             com_label = f"{self._com_port_name} {'CONNECTED' if self._com_connected else 'DISCONNECTED'}"
@@ -413,7 +518,13 @@ class MeasurementStatusService:
             "lastDownload": self._last_download,
             "recentMeasurements": list(reversed(self._recent_measurements)),
             "selectedMode": state.mode.value,
-            "modeLabel": self._build_mode_label(state.mode),
+            "selectedModeLabel": mode_spec.display_name,
+            "selectedModeFamily": mode_spec.family.value,
+            "selectedModeRequiresDownload": mode_spec.requires_download,
+            "selectedModeDelaySeconds": mode_spec.measurement_delay_seconds,
+            "selectedModeCalculationFactor": format(mode_spec.calculation_factor, "f"),
+            "availableModes": self._build_available_modes_payload_locked(),
+            "modeLabel": mode_spec.display_name,
             "phase": state.phase.value,
             "phaseLabel": self._build_phase_label(state.phase),
             "remainingSeconds": state.remaining_seconds,
@@ -429,6 +540,12 @@ class MeasurementStatusService:
             "activity": self._build_activity_payload_locked(state, feedback_messages),
             "displayMeasurement": self._build_display_measurement_locked(state),
         }
+
+    def _build_available_modes_payload_locked(self) -> list[dict[str, object]]:
+        return [
+            mode_spec.to_payload(mode, self._minimum_raw_value)
+            for mode, mode_spec in self._measurement_mode_specs.items()
+        ]
 
     def _build_activity_payload_locked(
         self,
@@ -564,6 +681,12 @@ class MeasurementStatusService:
     def _snapshot_locked(self) -> tuple[dict[str, object], tuple[StatusSubscriber, ...]]:
         return self._build_status_payload_locked(), tuple(self._subscribers)
 
+    def _matches_session_locked(self, session_token: int | None) -> bool:
+        if session_token is None:
+            return True
+
+        return self._session_state.session_token == session_token
+
     def _broadcast(self, payload: dict[str, object], subscribers: tuple[StatusSubscriber, ...]) -> None:
         for subscriber in subscribers:
             try:
@@ -622,21 +745,45 @@ class MeasurementStatusService:
             self._last_measurement = normalized_rows[-1]
 
     def _normalize_row(self, row: dict[str, str]) -> dict[str, str]:
-        qr_code = (row.get("qr_code") or row.get("serial_number") or "").strip()
+        serial_number = (row.get("SN") or row.get("qr_code") or row.get("serial_number") or "").strip()
         raw_current_text = (row.get("raw_current") or row.get("current_mA") or "0").strip()
         raw_current_value = self._parse_decimal(raw_current_text)
         current_reading = CurrentReading(raw_current_value, raw_current_text)
-        result = row.get("result") or self._measurement_threshold.classify(current_reading).value
-        mode = (row.get("mode") or MeasurementMode.SIGMASTUDIO.value).strip() or MeasurementMode.SIGMASTUDIO.value
+        resolved_mode = MeasurementMode.resolve_row_mode(
+            type_text=row.get("type"),
+            mode_text=row.get("mode"),
+            trailing_values=self._legacy_extra_values(row),
+            default_mode=self._default_measurement_mode,
+        )
+
+        threshold = self._measurement_threshold_by_mode[resolved_mode]
+        result = (row.get("result") or "").strip() or threshold.classify(current_reading).value
+        spec_text = (row.get("spec") or self._measurement_threshold_to_spec_text(resolved_mode)).strip() or self._measurement_threshold_to_spec_text(resolved_mode)
 
         return {
-            "measured_at": (row.get("measured_at") or "").strip(),
-            "qr_code": qr_code,
+            "measured_at": (row.get("measured_at") or row.get("datetime") or "").strip(),
+            "qr_code": serial_number,
+            "SN": serial_number,
+            "type": resolved_mode.display_name,
+            "spec": spec_text,
+            "Vop": (row.get("Vop") or "8").strip() or "8",
             "raw_current": current_reading.as_text(),
-            "current_mA": current_reading.as_display_text(),
+            "current_mA": current_reading.as_display_text(threshold.calculation_factor),
             "result": result,
-            "mode": mode,
+            "mode": resolved_mode.display_name,
         }
+
+    def _measurement_threshold_to_spec_text(self, measurement_mode: MeasurementMode) -> str:
+        return self._measurement_threshold_by_mode[measurement_mode].spec_text()
+
+    @staticmethod
+    def _legacy_extra_values(row: dict[str, str]) -> list[str]:
+        extra_values = row.get(None) or []
+        if isinstance(extra_values, list):
+            return [str(value).strip() for value in extra_values if str(value).strip()]
+
+        normalized = str(extra_values).strip()
+        return [normalized] if normalized else []
 
     @staticmethod
     def _parse_decimal(value: str) -> Decimal:
@@ -657,10 +804,7 @@ class MeasurementStatusService:
 
     @staticmethod
     def _build_mode_label(mode: MeasurementMode) -> str:
-        if mode == MeasurementMode.ANALOG:
-            return "Analog"
-
-        return "Digital"
+        return mode.display_name
 
     @staticmethod
     def _build_phase_label(phase: SessionPhase) -> str:
@@ -693,7 +837,4 @@ class MeasurementStatusService:
 
     @staticmethod
     def _resolve_mode(mode: MeasurementMode | str) -> MeasurementMode:
-        if isinstance(mode, MeasurementMode):
-            return mode
-
-        return MeasurementMode(str(mode))
+        return MeasurementMode.from_value(mode)

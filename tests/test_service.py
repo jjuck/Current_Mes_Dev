@@ -3,6 +3,7 @@ from decimal import Decimal
 
 import pytest
 
+from src.current_daemon.config import build_measurement_mode_specs
 from src.current_daemon.domain import CurrentReading, MeasurementMode, MeasurementResult, MeasurementThreshold, SerialNumber
 from src.current_daemon.service import MeasurementExecutionError, MeasurementRecorder, MeasurementSessionCancelledError
 
@@ -54,6 +55,7 @@ class FakeStatusService:
         self.remaining_seconds = None
         self.current_serial = None
         self.history = []
+        self.session_token = 0
 
     def _capture(self) -> None:
         self.history.append(
@@ -64,13 +66,23 @@ class FakeStatusService:
                 "selectedMode": self.selected_mode,
                 "lastDownload": self.last_download,
                 "currentSerial": self.current_serial,
+                "sessionToken": self.session_token,
             }
         )
+
+    def _matches(self, session_token: int | None) -> bool:
+        if session_token is None:
+            return True
+
+        return self.session_token == session_token
 
     def set_com_connection(self, is_connected: bool, port_name: str | None = None) -> None:
         self.connected = is_connected
 
-    def record_measurement(self, record) -> None:
+    def record_measurement(self, record, session_token: int | None = None) -> None:
+        if not self._matches(session_token):
+            return
+
         self.records.append(record)
         self.phase = "completed"
         self.session_active = False
@@ -79,11 +91,22 @@ class FakeStatusService:
         self.current_serial = record.serial_number.as_text()
         self._capture()
 
-    def mark_download_started(self) -> None:
+    def mark_download_started(self, session_token: int | None = None) -> None:
+        if not self._matches(session_token):
+            return
+
         self.phase = "downloading"
         self._capture()
 
-    def mark_download_completed(self, message: str = "✅ 다운로드 완료", mode: str | None = None) -> None:
+    def mark_download_completed(
+        self,
+        message: str = "✅ 다운로드 완료",
+        mode: str | None = None,
+        session_token: int | None = None,
+    ) -> None:
+        if not self._matches(session_token):
+            return
+
         self.last_download = {
             "success": True,
             "message": message,
@@ -92,7 +115,15 @@ class FakeStatusService:
         }
         self._capture()
 
-    def mark_download_failed(self, message: str = "⚠ 다운로드 실패", mode: str | None = None) -> None:
+    def mark_download_failed(
+        self,
+        message: str = "⚠ 다운로드 실패",
+        mode: str | None = None,
+        session_token: int | None = None,
+    ) -> None:
+        if not self._matches(session_token):
+            return
+
         self.last_download = {
             "success": False,
             "message": message,
@@ -105,7 +136,10 @@ class FakeStatusService:
         self.remaining_seconds = None
         self._capture()
 
-    def mark_download_skipped(self) -> None:
+    def mark_download_skipped(self, session_token: int | None = None) -> None:
+        if not self._matches(session_token):
+            return
+
         self.last_download = {
             "success": True,
             "message": None,
@@ -115,11 +149,12 @@ class FakeStatusService:
         self._capture()
 
     def set_selected_mode(self, mode) -> None:
-        self.selected_mode = str(mode)
+        self.selected_mode = MeasurementMode.from_value(mode).value
         self._capture()
 
     def begin_session(self, mode, serial_number=None) -> None:
-        self.selected_mode = str(mode)
+        self.session_token += 1
+        self.selected_mode = MeasurementMode.from_value(mode).value
         self.session_active = True
         self.cancel_requested = False
         self.phase = "waiting_for_trigger"
@@ -127,29 +162,45 @@ class FakeStatusService:
         self.current_serial = serial_number.as_text() if serial_number is not None else None
         self.last_download = None
         self._capture()
+        return self.session_token
 
-    def mark_waiting_for_trigger(self, serial_number=None) -> None:
+    def mark_waiting_for_trigger(self, serial_number=None, session_token: int | None = None) -> None:
+        if not self._matches(session_token):
+            return
+
         self.phase = "waiting_for_trigger"
         if serial_number is not None:
             self.current_serial = serial_number.as_text()
         self._capture()
 
-    def mark_measurement_delay_started(self, remaining_seconds: int) -> None:
+    def mark_measurement_delay_started(self, remaining_seconds: int, session_token: int | None = None) -> None:
+        if not self._matches(session_token):
+            return
+
         self.phase = "waiting_for_measurement"
         self.remaining_seconds = remaining_seconds
         self._capture()
 
-    def update_measurement_delay(self, remaining_seconds: int) -> None:
+    def update_measurement_delay(self, remaining_seconds: int, session_token: int | None = None) -> None:
+        if not self._matches(session_token):
+            return
+
         self.phase = "waiting_for_measurement"
         self.remaining_seconds = remaining_seconds
         self._capture()
 
-    def mark_measurement_started(self) -> None:
+    def mark_measurement_started(self, session_token: int | None = None) -> None:
+        if not self._matches(session_token):
+            return
+
         self.phase = "measuring"
         self.remaining_seconds = None
         self._capture()
 
-    def finish_session(self) -> None:
+    def finish_session(self, session_token: int | None = None) -> None:
+        if not self._matches(session_token):
+            return
+
         self.session_active = False
         self.cancel_requested = False
         self.remaining_seconds = None
@@ -165,17 +216,38 @@ class FakeStatusService:
         self._capture()
         return True
 
-    def is_session_cancel_requested(self) -> bool:
+    def interrupt_and_reset_session(self) -> bool:
+        had_active_session = self.session_active
+        self.session_token += 1
+        self.phase = "idle"
+        self.session_active = False
+        self.cancel_requested = False
+        self.remaining_seconds = None
+        self.current_serial = None
+        self.last_download = None
+        self._capture()
+        return had_active_session
+
+    def is_session_cancel_requested(self, session_token: int | None = None) -> bool:
+        if not self._matches(session_token):
+            return True
+
         return self.cancel_requested
 
-    def mark_session_cancelled(self, message: str = "측정이 취소되었습니다.") -> None:
+    def mark_session_cancelled(self, message: str = "측정이 취소되었습니다.", session_token: int | None = None) -> None:
+        if not self._matches(session_token):
+            return
+
         self.phase = "cancelled"
         self.session_active = False
         self.cancel_requested = False
         self.remaining_seconds = None
         self._capture()
 
-    def mark_error(self, message: str) -> None:
+    def mark_error(self, message: str, session_token: int | None = None) -> None:
+        if not self._matches(session_token):
+            return
+
         self.phase = "error"
         self.session_active = False
         self.cancel_requested = False
@@ -209,6 +281,21 @@ class FakeSleeper:
         self.calls.append(seconds)
 
 
+def build_thresholds() -> dict[MeasurementMode, MeasurementThreshold]:
+    minimum_raw_value = Decimal("10")
+    return {
+        mode: mode_spec.build_threshold(minimum_raw_value)
+        for mode, mode_spec in build_measurement_mode_specs().items()
+    }
+
+
+def build_delays() -> dict[MeasurementMode, int]:
+    return {
+        mode: mode_spec.measurement_delay_seconds
+        for mode, mode_spec in build_measurement_mode_specs().items()
+    }
+
+
 def test_measurement_recorder_returns_record_with_pass_result() -> None:
     sigma_downloader = FakeSigmaStudioDownloader()
     sleeper = FakeSleeper()
@@ -217,17 +304,12 @@ def test_measurement_recorder_returns_record_with_pass_result() -> None:
     recorder = MeasurementRecorder(
         instrument_reader=instrument_reader,
         measurement_logger=FakeMeasurementLogger(),
-        measurement_threshold_by_mode={
-            MeasurementMode.SIGMASTUDIO: MeasurementThreshold(Decimal("10"), Decimal("2000")),
-            MeasurementMode.ANALOG: MeasurementThreshold(Decimal("10"), Decimal("1000")),
-        },
+        measurement_threshold_by_mode=build_thresholds(),
+        measurement_mode_specs=build_measurement_mode_specs(),
         application_logger=logging.getLogger("test.measurement_recorder.pass"),
         status_service=status_service,
         sigma_studio_downloader=sigma_downloader,
-        measurement_delay_by_mode={
-            MeasurementMode.SIGMASTUDIO: 8,
-            MeasurementMode.ANALOG: 1,
-        },
+        measurement_delay_by_mode=build_delays(),
         sleeper=sleeper,
     )
 
@@ -237,7 +319,7 @@ def test_measurement_recorder_returns_record_with_pass_result() -> None:
     assert record.current_reading.as_display_text() == "20.00"
     assert sigma_downloader.calls == 1
     assert sleeper.calls[:2] == [0.2, 0.2]
-    assert sum(sleeper.calls[2:]) == pytest.approx(8)
+    assert sum(sleeper.calls[2:]) == pytest.approx(5)
     assert instrument_reader.read_count == 4
     assert record.mode == MeasurementMode.SIGMASTUDIO
     assert status_service.last_download["message"] == "✅ 다운로드 완료"
@@ -252,16 +334,11 @@ def test_measurement_recorder_raises_when_serial_measurement_fails() -> None:
     recorder = MeasurementRecorder(
         instrument_reader=FakeInstrumentReader(should_fail=True),
         measurement_logger=FakeMeasurementLogger(),
-        measurement_threshold_by_mode={
-            MeasurementMode.SIGMASTUDIO: MeasurementThreshold(Decimal("10"), Decimal("2000")),
-            MeasurementMode.ANALOG: MeasurementThreshold(Decimal("10"), Decimal("1000")),
-        },
+        measurement_threshold_by_mode=build_thresholds(),
+        measurement_mode_specs=build_measurement_mode_specs(),
         application_logger=logging.getLogger("test.measurement_recorder.fail"),
         status_service=status_service,
-        measurement_delay_by_mode={
-            MeasurementMode.SIGMASTUDIO: 8,
-            MeasurementMode.ANALOG: 1,
-        },
+        measurement_delay_by_mode=build_delays(),
         sleeper=FakeSleeper(),
     )
 
@@ -277,17 +354,12 @@ def test_measurement_recorder_sets_download_failure_feedback_when_sigma_download
     recorder = MeasurementRecorder(
         instrument_reader=FakeInstrumentReader(CurrentReading(Decimal("1784"), "1784")),
         measurement_logger=measurement_logger,
-        measurement_threshold_by_mode={
-            MeasurementMode.SIGMASTUDIO: MeasurementThreshold(Decimal("10"), Decimal("2000")),
-            MeasurementMode.ANALOG: MeasurementThreshold(Decimal("10"), Decimal("1000")),
-        },
+        measurement_threshold_by_mode=build_thresholds(),
+        measurement_mode_specs=build_measurement_mode_specs(),
         application_logger=logging.getLogger("test.measurement_recorder.download"),
         status_service=status_service,
         sigma_studio_downloader=FakeSigmaStudioDownloader(should_fail=True),
-        measurement_delay_by_mode={
-            MeasurementMode.SIGMASTUDIO: 8,
-            MeasurementMode.ANALOG: 1,
-        },
+        measurement_delay_by_mode=build_delays(),
         sleeper=FakeSleeper(),
     )
 
@@ -316,20 +388,15 @@ def test_measurement_recorder_waits_until_trigger_threshold_before_download() ->
     recorder = MeasurementRecorder(
         instrument_reader=instrument_reader,
         measurement_logger=FakeMeasurementLogger(),
-        measurement_threshold_by_mode={
-            MeasurementMode.SIGMASTUDIO: MeasurementThreshold(Decimal("10"), Decimal("2000")),
-            MeasurementMode.ANALOG: MeasurementThreshold(Decimal("10"), Decimal("1000")),
-        },
+        measurement_threshold_by_mode=build_thresholds(),
+        measurement_mode_specs=build_measurement_mode_specs(),
         application_logger=logging.getLogger("test.measurement_recorder.trigger"),
         status_service=FakeStatusService(),
         sigma_studio_downloader=sigma_downloader,
         download_trigger_raw_value=100,
         download_trigger_confirm_count=3,
         trigger_poll_interval_seconds=0.2,
-        measurement_delay_by_mode={
-            MeasurementMode.SIGMASTUDIO: 8,
-            MeasurementMode.ANALOG: 1,
-        },
+        measurement_delay_by_mode=build_delays(),
         sleeper=sleeper,
     )
 
@@ -338,7 +405,7 @@ def test_measurement_recorder_waits_until_trigger_threshold_before_download() ->
     assert record.current_reading.as_text() == "1784"
     assert sigma_downloader.calls == 1
     assert sleeper.calls[:3] == [0.2, 0.2, 0.2]
-    assert sum(sleeper.calls[3:]) == pytest.approx(8)
+    assert sum(sleeper.calls[3:]) == pytest.approx(5)
     assert instrument_reader.read_count == 5
 
 
@@ -359,20 +426,15 @@ def test_measurement_recorder_resets_trigger_confirmation_when_value_drops_below
     recorder = MeasurementRecorder(
         instrument_reader=instrument_reader,
         measurement_logger=FakeMeasurementLogger(),
-        measurement_threshold_by_mode={
-            MeasurementMode.SIGMASTUDIO: MeasurementThreshold(Decimal("10"), Decimal("2000")),
-            MeasurementMode.ANALOG: MeasurementThreshold(Decimal("10"), Decimal("1000")),
-        },
+        measurement_threshold_by_mode=build_thresholds(),
+        measurement_mode_specs=build_measurement_mode_specs(),
         application_logger=logging.getLogger("test.measurement_recorder.confirmation"),
         status_service=FakeStatusService(),
         sigma_studio_downloader=sigma_downloader,
         download_trigger_raw_value=100,
         download_trigger_confirm_count=3,
         trigger_poll_interval_seconds=0.2,
-        measurement_delay_by_mode={
-            MeasurementMode.SIGMASTUDIO: 8,
-            MeasurementMode.ANALOG: 1,
-        },
+        measurement_delay_by_mode=build_delays(),
         sleeper=sleeper,
     )
 
@@ -380,7 +442,7 @@ def test_measurement_recorder_resets_trigger_confirmation_when_value_drops_below
 
     assert sigma_downloader.calls == 1
     assert sleeper.calls[:4] == [0.2, 0.2, 0.2, 0.2]
-    assert sum(sleeper.calls[4:]) == pytest.approx(8)
+    assert sum(sleeper.calls[4:]) == pytest.approx(5)
 
 
 def test_measurement_recorder_skips_sigma_studio_in_analog_mode_and_uses_analog_delay() -> None:
@@ -399,20 +461,15 @@ def test_measurement_recorder_skips_sigma_studio_in_analog_mode_and_uses_analog_
     recorder = MeasurementRecorder(
         instrument_reader=instrument_reader,
         measurement_logger=FakeMeasurementLogger(),
-        measurement_threshold_by_mode={
-            MeasurementMode.SIGMASTUDIO: MeasurementThreshold(Decimal("10"), Decimal("2000")),
-            MeasurementMode.ANALOG: MeasurementThreshold(Decimal("10"), Decimal("1000")),
-        },
+        measurement_threshold_by_mode=build_thresholds(),
+        measurement_mode_specs=build_measurement_mode_specs(),
         application_logger=logging.getLogger("test.measurement_recorder.analog"),
         status_service=status_service,
         sigma_studio_downloader=sigma_downloader,
         download_trigger_raw_value=100,
         download_trigger_confirm_count=3,
         trigger_poll_interval_seconds=0.2,
-        measurement_delay_by_mode={
-            MeasurementMode.SIGMASTUDIO: 8,
-            MeasurementMode.ANALOG: 1,
-        },
+        measurement_delay_by_mode=build_delays(),
         sleeper=sleeper,
     )
 
@@ -424,11 +481,56 @@ def test_measurement_recorder_skips_sigma_studio_in_analog_mode_and_uses_analog_
 
     assert record.result == MeasurementResult.PASS
     assert record.mode == MeasurementMode.ANALOG
+    assert record.to_row()["type"] == "Analog"
+    assert record.to_row()["spec"] == "10.00mA"
     assert sigma_downloader.calls == 0
     assert sleeper.calls[:2] == [0.2, 0.2]
     assert sum(sleeper.calls[2:]) == pytest.approx(1)
     assert status_service.last_download["status"] == "skipped"
     assert "downloading" not in [item["phase"] for item in status_service.history]
+
+
+def test_measurement_recorder_applies_half_scaled_display_and_threshold_for_ancr_sensor() -> None:
+    sigma_downloader = FakeSigmaStudioDownloader()
+    sleeper = FakeSleeper()
+    status_service = FakeStatusService()
+    instrument_reader = FakeInstrumentReader(
+        current_reading=CurrentReading(Decimal("5000"), "5000"),
+        sequence=[
+            CurrentReading(Decimal("100"), "100"),
+            CurrentReading(Decimal("100"), "100"),
+            CurrentReading(Decimal("100"), "100"),
+            CurrentReading(Decimal("5000"), "5000"),
+        ],
+    )
+    recorder = MeasurementRecorder(
+        instrument_reader=instrument_reader,
+        measurement_logger=FakeMeasurementLogger(),
+        measurement_threshold_by_mode=build_thresholds(),
+        measurement_mode_specs=build_measurement_mode_specs(),
+        application_logger=logging.getLogger("test.measurement_recorder.ancr_sensor"),
+        status_service=status_service,
+        sigma_studio_downloader=sigma_downloader,
+        download_trigger_raw_value=100,
+        download_trigger_confirm_count=3,
+        trigger_poll_interval_seconds=0.2,
+        measurement_delay_by_mode=build_delays(),
+        sleeper=sleeper,
+    )
+
+    record = recorder.measure_and_log(
+        SerialNumber("SN-ANCR-SENSOR"),
+        trigger="test",
+        measurement_mode=MeasurementMode.ANCR_SENSOR,
+    )
+
+    assert record.result == MeasurementResult.PASS
+    assert record.mode == MeasurementMode.ANCR_SENSOR
+    assert record.to_row()["spec"] == "25.00mA"
+    assert record.to_payload()["current_mA"] == "25.00"
+    assert record.to_payload()["mode"] == "ANCR Sensor"
+    assert sigma_downloader.calls == 1
+    assert sum(sleeper.calls[2:]) == pytest.approx(5)
 
 
 def test_measurement_recorder_stops_when_session_cancel_requested_during_trigger_wait() -> None:
@@ -455,20 +557,15 @@ def test_measurement_recorder_stops_when_session_cancel_requested_during_trigger
     recorder = MeasurementRecorder(
         instrument_reader=instrument_reader,
         measurement_logger=FakeMeasurementLogger(),
-        measurement_threshold_by_mode={
-            MeasurementMode.SIGMASTUDIO: MeasurementThreshold(Decimal("10"), Decimal("2000")),
-            MeasurementMode.ANALOG: MeasurementThreshold(Decimal("10"), Decimal("1000")),
-        },
+        measurement_threshold_by_mode=build_thresholds(),
+        measurement_mode_specs=build_measurement_mode_specs(),
         application_logger=logging.getLogger("test.measurement_recorder.cancel"),
         status_service=status_service,
         sigma_studio_downloader=sigma_downloader,
         download_trigger_raw_value=100,
         download_trigger_confirm_count=3,
         trigger_poll_interval_seconds=0.2,
-        measurement_delay_by_mode={
-            MeasurementMode.SIGMASTUDIO: 8,
-            MeasurementMode.ANALOG: 1,
-        },
+        measurement_delay_by_mode=build_delays(),
         sleeper=sleeper,
     )
 
@@ -481,3 +578,51 @@ def test_measurement_recorder_stops_when_session_cancel_requested_during_trigger
     assert status_service.session_active is False
     assert status_service.cancel_requested is False
     assert status_service.phase == "cancelled"
+
+
+def test_measurement_recorder_interrupt_and_reset_returns_to_idle_during_trigger_wait() -> None:
+    status_service = FakeStatusService()
+    sigma_downloader = FakeSigmaStudioDownloader()
+
+    class InterruptAfterFirstSleep:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def __call__(self, seconds: int) -> None:
+            self.calls.append(seconds)
+            if len(self.calls) == 1:
+                status_service.interrupt_and_reset_session()
+
+    sleeper = InterruptAfterFirstSleep()
+    instrument_reader = FakeInstrumentReader(
+        current_reading=CurrentReading(Decimal("50"), "50"),
+        sequence=[
+            CurrentReading(Decimal("50"), "50"),
+            CurrentReading(Decimal("50"), "50"),
+        ],
+    )
+    recorder = MeasurementRecorder(
+        instrument_reader=instrument_reader,
+        measurement_logger=FakeMeasurementLogger(),
+        measurement_threshold_by_mode=build_thresholds(),
+        measurement_mode_specs=build_measurement_mode_specs(),
+        application_logger=logging.getLogger("test.measurement_recorder.interrupt_reset"),
+        status_service=status_service,
+        sigma_studio_downloader=sigma_downloader,
+        download_trigger_raw_value=100,
+        download_trigger_confirm_count=3,
+        trigger_poll_interval_seconds=0.2,
+        measurement_delay_by_mode=build_delays(),
+        sleeper=sleeper,
+    )
+
+    with pytest.raises(MeasurementSessionCancelledError):
+        recorder.measure_and_log(SerialNumber("SN-RESET"), trigger="test")
+
+    assert sigma_downloader.calls == 0
+    assert instrument_reader.read_count == 1
+    assert sleeper.calls == [0.2]
+    assert status_service.session_active is False
+    assert status_service.cancel_requested is False
+    assert status_service.phase == "idle"
+    assert status_service.current_serial is None

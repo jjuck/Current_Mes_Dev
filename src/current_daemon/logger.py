@@ -7,11 +7,11 @@ from pathlib import Path
 
 import pandas as pd
 
-from .domain import CurrentReading, MeasurementRecord, MeasurementThreshold
+from .domain import CurrentReading, MeasurementMode, MeasurementRecord, MeasurementThreshold
 
 
 class MeasurementCsvLogger:
-    EXPECTED_COLUMNS = ["measured_at", "qr_code", "raw_current", "current_mA", "result"]
+    EXPECTED_COLUMNS = ["datetime", "SN", "type", "spec", "Vop", "raw_current", "current_mA", "result"]
 
     def __init__(
         self,
@@ -19,11 +19,17 @@ class MeasurementCsvLogger:
         encoding: str,
         measurement_threshold: MeasurementThreshold,
         legacy_log_csv_path: Path | None = None,
+        measurement_threshold_by_mode: dict[MeasurementMode, MeasurementThreshold] | None = None,
+        default_measurement_mode: MeasurementMode = MeasurementMode.SIGMASTUDIO,
     ) -> None:
         self._log_csv_path = log_csv_path
         self._encoding = encoding
         self._measurement_threshold = measurement_threshold
         self._legacy_log_csv_path = legacy_log_csv_path
+        self._measurement_threshold_by_mode = measurement_threshold_by_mode or {
+            default_measurement_mode: measurement_threshold,
+        }
+        self._default_measurement_mode = default_measurement_mode
 
     def append(self, record: MeasurementRecord) -> None:
         self._log_csv_path.parent.mkdir(parents=True, exist_ok=True)
@@ -67,19 +73,44 @@ class MeasurementCsvLogger:
         self._legacy_log_csv_path.replace(self._log_csv_path)
 
     def _normalize_legacy_row(self, row: dict[str, str]) -> dict[str, str]:
-        qr_code = (row.get("qr_code") or row.get("serial_number") or "").strip()
+        serial_number = (row.get("SN") or row.get("qr_code") or row.get("serial_number") or "").strip()
         raw_current_text = (row.get("raw_current") or row.get("current_mA") or "0").strip()
         raw_current_value = self._parse_decimal(raw_current_text)
         current_reading = CurrentReading(raw_current_value, raw_current_text)
-        result = row.get("result") or self._measurement_threshold.classify(current_reading).value
+        resolved_mode = MeasurementMode.resolve_row_mode(
+            type_text=row.get("type"),
+            mode_text=row.get("mode"),
+            trailing_values=self._legacy_extra_values(row),
+            default_mode=self._default_measurement_mode,
+        )
+        threshold = self._measurement_threshold_by_mode[resolved_mode]
+        result = (row.get("result") or "").strip() or threshold.classify(current_reading).value
+        spec_text = (row.get("spec") or self._measurement_threshold_to_spec_text(threshold)).strip() or self._measurement_threshold_to_spec_text(threshold)
+        vop_text = (row.get("Vop") or "8").strip() or "8"
 
         return {
-            "measured_at": (row.get("measured_at") or "").strip(),
-            "qr_code": qr_code,
+            "datetime": (row.get("datetime") or row.get("measured_at") or "").strip(),
+            "SN": serial_number,
+            "type": resolved_mode.display_name,
+            "spec": spec_text,
+            "Vop": vop_text,
             "raw_current": current_reading.as_text(),
-            "current_mA": current_reading.as_display_text(),
+            "current_mA": current_reading.as_display_text(threshold.calculation_factor),
             "result": result,
         }
+
+    @staticmethod
+    def _legacy_extra_values(row: dict[str, str]) -> list[str]:
+        extra_values = row.get(None) or []
+        if isinstance(extra_values, list):
+            return [str(value).strip() for value in extra_values if str(value).strip()]
+
+        normalized = str(extra_values).strip()
+        return [normalized] if normalized else []
+
+    @staticmethod
+    def _measurement_threshold_to_spec_text(threshold: MeasurementThreshold) -> str:
+        return threshold.spec_text()
 
     @staticmethod
     def _parse_decimal(value: str) -> Decimal:

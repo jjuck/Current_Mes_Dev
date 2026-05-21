@@ -1,13 +1,49 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from decimal import Decimal
 from pathlib import Path
-from typing import Literal
 
 import serial
 
+from .domain import MeasurementMode, MeasurementModeFamily, MeasurementModeSpec
 
-MeasurementMode = Literal["sigmastudio", "analog"]
+
+def build_measurement_mode_specs() -> dict[MeasurementMode, MeasurementModeSpec]:
+    return {
+        MeasurementMode.SIGMASTUDIO: MeasurementModeSpec(
+            display_name="Digital",
+            family=MeasurementModeFamily.DIGITAL,
+            maximum_raw_value=Decimal("2500"),
+            measurement_delay_seconds=5,
+            requires_download=True,
+            calculation_factor=Decimal("1"),
+        ),
+        MeasurementMode.ANALOG: MeasurementModeSpec(
+            display_name="Analog",
+            family=MeasurementModeFamily.ANALOG,
+            maximum_raw_value=Decimal("1000"),
+            measurement_delay_seconds=1,
+            requires_download=False,
+            calculation_factor=Decimal("1"),
+        ),
+        MeasurementMode.ANCR_MIC: MeasurementModeSpec(
+            display_name="ANCR MIC",
+            family=MeasurementModeFamily.ANALOG,
+            maximum_raw_value=Decimal("1900"),
+            measurement_delay_seconds=1,
+            requires_download=False,
+            calculation_factor=Decimal("1"),
+        ),
+        MeasurementMode.ANCR_SENSOR: MeasurementModeSpec(
+            display_name="ANCR Sensor",
+            family=MeasurementModeFamily.DIGITAL,
+            maximum_raw_value=Decimal("2500"),
+            measurement_delay_seconds=5,
+            requires_download=True,
+            calculation_factor=Decimal("0.5"),
+        ),
+    }
 
 
 @dataclass(frozen=True)
@@ -26,19 +62,16 @@ class AppConfig:
     log_csv_path: Path
     log_encoding: str
     serial_settings: SerialSettings
-    default_measurement_mode: MeasurementMode = "sigmastudio"
+    default_measurement_mode: MeasurementMode = MeasurementMode.SIGMASTUDIO
     web_host: str = "127.0.0.1"
     web_port: int = 8000
     pass_min_raw_value: int = 10
-    sigmastudio_pass_max_raw_value: int = 2000
-    analog_pass_max_raw_value: int = 1000
+    measurement_mode_specs: dict[MeasurementMode, MeasurementModeSpec] = field(default_factory=build_measurement_mode_specs)
     download_trigger_raw_value: int = 100
     download_trigger_confirm_count: int = 3
     trigger_poll_interval_seconds: float = 0.2
     recent_measurement_limit: int = 10
     input_refocus_delay_seconds: int = 1
-    sigmastudio_measurement_delay_seconds: int = 8
-    analog_measurement_delay_seconds: int = 1
     legacy_log_csv_path: Path | None = None
     logo_asset_path: Path | None = None
     sigma_studio_dll_path: Path | None = None
@@ -54,19 +87,16 @@ def build_config() -> AppConfig:
         log_csv_path=project_root / "logs" / "current_measurement_log.csv",
         log_encoding="utf-8-sig",
         serial_settings=SerialSettings(),
-        default_measurement_mode="sigmastudio",
+        default_measurement_mode=MeasurementMode.SIGMASTUDIO,
         web_host="127.0.0.1",
         web_port=8000,
         pass_min_raw_value=10,
-        sigmastudio_pass_max_raw_value=2000,
-        analog_pass_max_raw_value=1000,
+        measurement_mode_specs=build_measurement_mode_specs(),
         download_trigger_raw_value=100,
         download_trigger_confirm_count=3,
         trigger_poll_interval_seconds=0.2,
         recent_measurement_limit=10,
         input_refocus_delay_seconds=1,
-        sigmastudio_measurement_delay_seconds=8,
-        analog_measurement_delay_seconds=1,
         legacy_log_csv_path=project_root / "current_measurement_log.csv",
         logo_asset_path=project_root / "web" / "assets" / "logo.png",
         sigma_studio_dll_path=Path(r"C:\Program Files\Analog Devices\SigmaStudio 4.6\Analog.SigmaStudioServer.dll"),

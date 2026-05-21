@@ -20,19 +20,56 @@ const systemState = document.querySelector('#system-state');
 const refreshStatusButton = document.querySelector('#refresh-status-button');
 const processRangeText = document.querySelector('#process-range-text');
 const scanButton = document.querySelector('.scan-button');
-const cancelSessionButton = document.querySelector('#cancel-session-button');
-const resetSessionButton = document.querySelector('#reset-session-button');
+const interruptSessionButton = document.querySelector('#interrupt-session-button');
 
-const MODE_LABELS = {
-  sigmastudio: 'Digital',
-  analog: 'Analog',
-};
+const DEFAULT_MODE_OPTIONS = [
+  {
+    value: 'sigmastudio',
+    label: 'Digital',
+    family: 'digital',
+    requiresDownload: true,
+    measurementDelaySeconds: 5,
+    minimumCurrent_mA: '0.10',
+    maximumCurrent_mA: '25.00',
+  },
+  {
+    value: 'analog',
+    label: 'Analog',
+    family: 'analog',
+    requiresDownload: false,
+    measurementDelaySeconds: 1,
+    minimumCurrent_mA: '0.10',
+    maximumCurrent_mA: '10.00',
+  },
+  {
+    value: 'ancr_mic',
+    label: 'ANCR MIC',
+    family: 'analog',
+    requiresDownload: false,
+    measurementDelaySeconds: 1,
+    minimumCurrent_mA: '0.10',
+    maximumCurrent_mA: '19.00',
+  },
+  {
+    value: 'ancr_sensor',
+    label: 'ANCR Sensor',
+    family: 'digital',
+    requiresDownload: true,
+    measurementDelaySeconds: 5,
+    minimumCurrent_mA: '0.10',
+    maximumCurrent_mA: '30.00',
+  },
+];
 
 let statusSocket = null;
 let socketReconnectTimer = null;
 let socketReconnectAttempts = 0;
 let lastRenderedStatus = null;
 let socketConnected = false;
+let englishInputSyncPromise = null;
+let lastEnglishInputSyncAt = 0;
+
+const ENGLISH_INPUT_SYNC_COOLDOWN_MS = 750;
 
 function escapeHtml(value) {
   return String(value)
@@ -43,17 +80,101 @@ function escapeHtml(value) {
     .replaceAll("'", '&#039;');
 }
 
-function focusScanInput() {
+async function ensureEnglishInputMode(options = {}) {
+  const { force = false } = options;
+  const now = Date.now();
+  if (!force && now - lastEnglishInputSyncAt < ENGLISH_INPUT_SYNC_COOLDOWN_MS) {
+    return null;
+  }
+
+  if (englishInputSyncPromise) {
+    return englishInputSyncPromise;
+  }
+
+  englishInputSyncPromise = fetch('/api/input/english-mode', {
+    method: 'POST',
+  })
+    .then(async (response) => {
+      if (!response.ok) {
+        throw new Error('English input mode request failed.');
+      }
+
+      return response.json();
+    })
+    .finally(() => {
+      lastEnglishInputSyncAt = Date.now();
+      englishInputSyncPromise = null;
+    });
+
+  return englishInputSyncPromise;
+}
+
+function requestEnglishInputMode(options = {}) {
+  void ensureEnglishInputMode(options).catch((error) => {
+    console.error(error);
+  });
+}
+
+function focusScanInput(options = {}) {
   if (document.hidden || input.disabled) {
     return;
   }
+
+  requestEnglishInputMode(options);
 
   input.focus();
   input.select();
 }
 
 function getModeLabel(mode) {
-  return MODE_LABELS[mode] || mode;
+  return getModeMeta(mode)?.label || mode;
+}
+
+function getAvailableModes(status) {
+  if (Array.isArray(status?.availableModes) && status.availableModes.length > 0) {
+    return status.availableModes;
+  }
+
+  return DEFAULT_MODE_OPTIONS;
+}
+
+function getModeMeta(mode, availableModes = DEFAULT_MODE_OPTIONS) {
+  return availableModes.find((item) => item.value === mode) || null;
+}
+
+function buildProcessRangeText(modeMeta) {
+  if (!modeMeta?.minimumCurrent_mA || !modeMeta?.maximumCurrent_mA) {
+    return null;
+  }
+
+  return `공정 한계 : ${modeMeta.minimumCurrent_mA}mA ~ ${modeMeta.maximumCurrent_mA}mA`;
+}
+
+function buildIdleFeedbackMessage(modeMeta) {
+  if (!modeMeta) {
+    return '선택된 모드의 다운로드/측정 상태가 여기에 표시됩니다.';
+  }
+
+  const modeAction = modeMeta.requiresDownload ? '다운로드/측정' : '측정';
+  return `${modeMeta.label} ${modeAction} 상태가 여기에 표시됩니다.`;
+}
+
+function renderModeOptions(status) {
+  const availableModes = getAvailableModes(status);
+  const selectedMode = status?.selectedMode || measurementModeSelect.value || DEFAULT_MODE_OPTIONS[0].value;
+  const hasMatchingOption = availableModes.some((mode) => mode.value === selectedMode);
+  const resolvedSelectedMode = hasMatchingOption ? selectedMode : availableModes[0]?.value || DEFAULT_MODE_OPTIONS[0].value;
+
+  measurementModeSelect.innerHTML = availableModes
+    .map((mode) => `<option value="${escapeHtml(mode.value)}">${escapeHtml(mode.label)}</option>`)
+    .join('');
+  measurementModeSelect.value = resolvedSelectedMode;
+
+  return {
+    availableModes,
+    selectedMode: resolvedSelectedMode,
+    selectedModeMeta: getModeMeta(resolvedSelectedMode, availableModes),
+  };
 }
 
 function setInputLocked(isLocked) {
@@ -62,9 +183,7 @@ function setInputLocked(isLocked) {
 }
 
 function updateSessionControls(status) {
-  const isSessionActive = Boolean(status?.sessionActive);
-  const isCancellationRequested = Boolean(status?.sessionCancellationRequested);
-  cancelSessionButton.disabled = !isSessionActive || isCancellationRequested;
+  interruptSessionButton.disabled = false;
 }
 
 function setSocketBadge(isConnected) {
@@ -125,8 +244,10 @@ function renderActivity(status) {
 }
 
 function renderStatusMeta(status) {
-  measurementModeSelect.value = status.selectedMode || 'sigmastudio';
-  modeBadge.textContent = status.modeLabel || getModeLabel(status.selectedMode || 'sigmastudio');
+  const { availableModes, selectedMode, selectedModeMeta } = renderModeOptions(status);
+  const selectedModeLabel = status.selectedModeLabel || status.modeLabel || selectedModeMeta?.label || getModeLabel(selectedMode);
+
+  modeBadge.textContent = selectedModeLabel;
   comBadge.textContent = status.comLabel;
   comBadge.className = `status-pill ${status.comConnected ? 'status-pill--online' : 'status-pill--offline'}`;
   systemState.textContent = status.comConnected ? 'SYSTEM NOMINAL' : 'SYSTEM CHECK REQUIRED';
@@ -135,13 +256,16 @@ function renderStatusMeta(status) {
 
   if (status.processRangeText) {
     processRangeText.textContent = status.processRangeText;
+  } else {
+    processRangeText.textContent = buildProcessRangeText(selectedModeMeta) || processRangeText.textContent;
   }
 
-  downloadFeedback.textContent = status.latestFeedbackMessage || '';
+  downloadFeedback.textContent = status.latestFeedbackMessage || buildIdleFeedbackMessage(selectedModeMeta);
   updateSessionControls(status);
 }
 
 function renderStatus(status) {
+  const previousStatus = lastRenderedStatus;
   lastRenderedStatus = status;
   renderStatusMeta(status);
   renderActivity(status);
@@ -150,7 +274,7 @@ function renderStatus(status) {
 
   if (!status.sessionActive) {
     window.setTimeout(() => {
-      focusScanInput();
+      focusScanInput({ force: !previousStatus || previousStatus.sessionActive });
     }, 0);
   }
 }
@@ -194,14 +318,14 @@ async function submitMeasurement(qrCode) {
   return response.json();
 }
 
-async function requestSessionCancel() {
-  const response = await fetch('/api/session/cancel', {
+async function requestSessionInterruptAndReset() {
+  const response = await fetch('/api/session/interrupt-reset', {
     method: 'POST',
   });
 
   if (!response.ok) {
     const errorPayload = await response.json();
-    throw new Error(errorPayload.detail || 'Session cancel failed.');
+    throw new Error(errorPayload.detail || 'Session interrupt/reset failed.');
   }
 
   return response.json();
@@ -269,31 +393,22 @@ form.addEventListener('submit', async (event) => {
 
 refreshStatusButton.addEventListener('click', async () => {
   await synchronizeStatus();
-  focusScanInput();
+  focusScanInput({ force: true });
 });
 
-cancelSessionButton.addEventListener('click', async () => {
+interruptSessionButton.addEventListener('click', async () => {
+  input.value = '';
+
   try {
-    const payload = await requestSessionCancel();
+    const payload = await requestSessionInterruptAndReset();
     if (payload.status) {
       renderStatus(payload.status);
     }
   } catch (error) {
     await synchronizeStatus().catch(() => console.error(error));
+  } finally {
+    focusScanInput({ force: true });
   }
-});
-
-resetSessionButton.addEventListener('click', () => {
-  if (lastRenderedStatus?.sessionActive) {
-    cancelSessionButton.click();
-    return;
-  }
-
-  input.value = '';
-  if (lastRenderedStatus) {
-    renderStatus(lastRenderedStatus);
-  }
-  focusScanInput();
 });
 
 measurementModeSelect.addEventListener('change', async () => {
@@ -314,5 +429,23 @@ window.addEventListener('load', async () => {
     activityTitle.textContent = 'OFFLINE';
     activityMessage.textContent = '초기 상태를 불러오지 못했습니다.';
   });
-  focusScanInput();
+  focusScanInput({ force: true });
+});
+
+window.addEventListener('focus', () => {
+  focusScanInput({ force: true });
+});
+
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) {
+    focusScanInput({ force: true });
+  }
+});
+
+input.addEventListener('focus', () => {
+  requestEnglishInputMode({ force: true });
+});
+
+input.addEventListener('pointerdown', () => {
+  requestEnglishInputMode({ force: true });
 });
