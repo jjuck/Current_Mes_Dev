@@ -92,17 +92,19 @@
 
 ## 7. 로그 스키마
 
-로그 파일은 [`logs/current_measurement_log.csv`](logs/current_measurement_log.csv) 에 저장됩니다.
+로그 파일은 `logs/<type>/<YYMMDD>/<YYMMDD>_Current_<type>.csv` 형식으로 저장됩니다.
+예: [`logs/ANCRSensor/260615/260615_Current_ANCRSensor.csv`](logs/ANCRSensor/260615/260615_Current_ANCRSensor.csv)
 
 현재 컬럼 순서:
 
+- `datetime`
 - `SN`
+- `result`
+- `raw_current`
+- `current_mA`
 - `type`
 - `spec`
 - `Vop`
-- `raw_current`
-- `current_mA`
-- `result`
 
 규칙:
 
@@ -174,11 +176,11 @@ run.bat
 - [`web/assets/logo.png`](web/assets/logo.png): 브랜드 로고
 
 ### SigmaStudio Fallback
-- [`SigmaDownloader.cs`](SigmaDownloader.cs): C# 콘솔 앱 소스
+- [`tools/sigma_downloader/SigmaDownloader.cs`](tools/sigma_downloader/SigmaDownloader.cs): C# 콘솔 앱 소스
 - [`SigmaDownloader.exe`](SigmaDownloader.exe): Fallback 실행 파일
 
 ### 로그 및 테스트
-- [`logs/current_measurement_log.csv`](logs/current_measurement_log.csv): 측정 로그
+- `logs/<type>/<YYMMDD>/<YYMMDD>_Current_<type>.csv`: 측정 로그
 - [`tests/`](tests): 자동화 테스트
 
 ## 11. 주요 설정 위치

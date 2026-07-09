@@ -12,7 +12,7 @@ class SerialNumber:
     value: str
 
     def __post_init__(self) -> None:
-        normalized = self.value.strip()
+        normalized = self.value.strip(" \t\r\n")
         if not normalized:
             raise ValueError("Serial number cannot be empty.")
 
@@ -142,14 +142,32 @@ class MeasurementMode(StrEnum):
         return default_mode or cls.SIGMASTUDIO
 
 
+ANCR_SENSOR_HALF_SCALE_MIN_RAW_CURRENT = Decimal("3000")
+
+
+def resolve_effective_calculation_factor(
+    measurement_mode: MeasurementMode,
+    current_reading: CurrentReading,
+    configured_factor: Decimal,
+) -> Decimal:
+    if (
+        measurement_mode == MeasurementMode.ANCR_SENSOR
+        and current_reading.milliampere < ANCR_SENSOR_HALF_SCALE_MIN_RAW_CURRENT
+    ):
+        return Decimal("1")
+
+    return configured_factor
+
+
 @dataclass(frozen=True)
 class MeasurementThreshold:
     minimum_raw_value: Decimal
     maximum_raw_value: Decimal
     calculation_factor: Decimal = Decimal("1")
 
-    def classify(self, current_reading: CurrentReading) -> MeasurementResult:
-        scaled_raw_value = current_reading.scaled_raw_value(self.calculation_factor)
+    def classify(self, current_reading: CurrentReading, calculation_factor: Decimal | None = None) -> MeasurementResult:
+        effective_calculation_factor = self.calculation_factor if calculation_factor is None else calculation_factor
+        scaled_raw_value = current_reading.scaled_raw_value(effective_calculation_factor)
         if self.minimum_raw_value <= scaled_raw_value <= self.maximum_raw_value:
             return MeasurementResult.PASS
 
@@ -210,12 +228,12 @@ class MeasurementRecord:
         return {
             "datetime": self.measured_at.isoformat(timespec="seconds"),
             "SN": self.serial_number.as_text(),
+            "result": self.result.value,
+            "raw_current": self.current_reading.as_text(),
+            "current_mA": self.current_reading.as_display_text(self.calculation_factor),
             "type": self.mode.display_name,
             "spec": self.spec_text,
             "Vop": self.vop_text,
-            "raw_current": self.current_reading.as_text(),
-            "current_mA": self.current_reading.as_display_text(self.calculation_factor),
-            "result": self.result.value,
         }
 
     def to_payload(self) -> dict[str, str]:

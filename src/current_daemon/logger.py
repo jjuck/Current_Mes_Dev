@@ -7,11 +7,11 @@ from pathlib import Path
 
 import pandas as pd
 
-from .domain import CurrentReading, MeasurementMode, MeasurementRecord, MeasurementThreshold
+from .domain import CurrentReading, MeasurementMode, MeasurementRecord, MeasurementThreshold, resolve_effective_calculation_factor
 
 
 class MeasurementCsvLogger:
-    EXPECTED_COLUMNS = ["datetime", "SN", "type", "spec", "Vop", "raw_current", "current_mA", "result"]
+    EXPECTED_COLUMNS = ["datetime", "SN", "result", "raw_current", "current_mA", "type", "spec", "Vop"]
 
     def __init__(
         self,
@@ -32,24 +32,43 @@ class MeasurementCsvLogger:
         self._default_measurement_mode = default_measurement_mode
 
     def append(self, record: MeasurementRecord) -> None:
-        self._log_csv_path.parent.mkdir(parents=True, exist_ok=True)
         self._migrate_legacy_location_if_needed()
-        self._migrate_legacy_header_if_needed()
-        dataframe = pd.DataFrame([record.to_row()])
-        should_write_header = not self._log_csv_path.exists() or self._log_csv_path.stat().st_size == 0
+        self._migrate_legacy_header_if_needed(self._log_csv_path)
+
+        record_log_csv_path = self._build_record_log_csv_path(record)
+        record_log_csv_path.parent.mkdir(parents=True, exist_ok=True)
+        self._migrate_legacy_header_if_needed(record_log_csv_path)
+
+        dataframe = pd.DataFrame([record.to_row()], columns=self.EXPECTED_COLUMNS)
+        should_write_header = not record_log_csv_path.exists() or record_log_csv_path.stat().st_size == 0
         dataframe.to_csv(
-            self._log_csv_path,
+            record_log_csv_path,
             mode="a",
             index=False,
             header=should_write_header,
             encoding=self._encoding,
         )
 
-    def _migrate_legacy_header_if_needed(self) -> None:
-        if not self._log_csv_path.exists() or self._log_csv_path.stat().st_size == 0:
+    def _build_record_log_csv_path(self, record: MeasurementRecord) -> Path:
+        type_token = self._build_type_token(record.mode)
+        date_token = record.measured_at.strftime("%y%m%d")
+        return self._log_root_path() / type_token / date_token / f"{date_token}_Current_{type_token}.csv"
+
+    def _log_root_path(self) -> Path:
+        if self._log_csv_path.suffix:
+            return self._log_csv_path.parent
+
+        return self._log_csv_path
+
+    @staticmethod
+    def _build_type_token(measurement_mode: MeasurementMode) -> str:
+        return "".join(character for character in measurement_mode.display_name if character.isalnum())
+
+    def _migrate_legacy_header_if_needed(self, log_csv_path: Path) -> None:
+        if not log_csv_path.exists() or log_csv_path.stat().st_size == 0:
             return
 
-        with self._log_csv_path.open("r", encoding=self._encoding, newline="") as log_file:
+        with log_csv_path.open("r", encoding=self._encoding, newline="") as log_file:
             reader = csv.DictReader(log_file)
             fieldnames = reader.fieldnames or []
             if fieldnames == self.EXPECTED_COLUMNS:
@@ -57,7 +76,7 @@ class MeasurementCsvLogger:
 
             normalized_rows = [self._normalize_legacy_row(row) for row in reader]
 
-        with self._log_csv_path.open("w", encoding=self._encoding, newline="") as log_file:
+        with log_csv_path.open("w", encoding=self._encoding, newline="") as log_file:
             writer = csv.DictWriter(log_file, fieldnames=self.EXPECTED_COLUMNS)
             writer.writeheader()
             writer.writerows(normalized_rows)
@@ -84,19 +103,24 @@ class MeasurementCsvLogger:
             default_mode=self._default_measurement_mode,
         )
         threshold = self._measurement_threshold_by_mode[resolved_mode]
-        result = (row.get("result") or "").strip() or threshold.classify(current_reading).value
+        effective_calculation_factor = resolve_effective_calculation_factor(
+            resolved_mode,
+            current_reading,
+            threshold.calculation_factor,
+        )
+        result = (row.get("result") or "").strip() or threshold.classify(current_reading, effective_calculation_factor).value
         spec_text = (row.get("spec") or self._measurement_threshold_to_spec_text(threshold)).strip() or self._measurement_threshold_to_spec_text(threshold)
         vop_text = (row.get("Vop") or "8").strip() or "8"
 
         return {
             "datetime": (row.get("datetime") or row.get("measured_at") or "").strip(),
             "SN": serial_number,
+            "result": result,
+            "raw_current": current_reading.as_text(),
+            "current_mA": current_reading.as_display_text(effective_calculation_factor),
             "type": resolved_mode.display_name,
             "spec": spec_text,
             "Vop": vop_text,
-            "raw_current": current_reading.as_text(),
-            "current_mA": current_reading.as_display_text(threshold.calculation_factor),
-            "result": result,
         }
 
     @staticmethod

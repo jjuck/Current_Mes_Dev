@@ -1,7 +1,15 @@
 from datetime import datetime
 from decimal import Decimal
 
-from src.current_daemon.domain import CurrentReading, MeasurementMode, MeasurementRecord, MeasurementResult, MeasurementThreshold, SerialNumber
+from src.current_daemon.domain import (
+    CurrentReading,
+    MeasurementMode,
+    MeasurementRecord,
+    MeasurementResult,
+    MeasurementThreshold,
+    SerialNumber,
+    resolve_effective_calculation_factor,
+)
 
 
 def test_current_reading_formats_display_value_from_raw_current() -> None:
@@ -35,7 +43,7 @@ def test_measurement_record_serializes_result_and_display_value() -> None:
     assert record.to_row()["type"] == "Digital"
 
 
-def test_measurement_record_serializes_datetime_as_first_csv_column() -> None:
+def test_measurement_record_serializes_csv_columns_in_log_order() -> None:
     record = MeasurementRecord(
         measured_at=datetime(2026, 4, 24, 12, 34, 56),
         serial_number=SerialNumber("SN-DATETIME"),
@@ -47,7 +55,16 @@ def test_measurement_record_serializes_datetime_as_first_csv_column() -> None:
 
     row = record.to_row()
 
-    assert list(row.keys())[0] == "datetime"
+    assert list(row.keys()) == [
+        "datetime",
+        "SN",
+        "result",
+        "raw_current",
+        "current_mA",
+        "type",
+        "spec",
+        "Vop",
+    ]
     assert row["datetime"] == "2026-04-24T12:34:56"
 
 
@@ -74,3 +91,23 @@ def test_measurement_record_serializes_ancr_sensor_with_half_scaled_display_and_
 
     assert record.to_payload()["current_mA"] == "25.00"
     assert record.to_payload()["mode"] == "ANCR Sensor"
+
+
+def test_ancr_sensor_uses_unscaled_factor_below_raw_current_3000() -> None:
+    factor = resolve_effective_calculation_factor(
+        MeasurementMode.ANCR_SENSOR,
+        CurrentReading(Decimal("2999"), "2999"),
+        Decimal("0.5"),
+    )
+
+    assert factor == Decimal("1")
+
+
+def test_ancr_sensor_uses_half_factor_at_raw_current_3000() -> None:
+    factor = resolve_effective_calculation_factor(
+        MeasurementMode.ANCR_SENSOR,
+        CurrentReading(Decimal("3000"), "3000"),
+        Decimal("0.5"),
+    )
+
+    assert factor == Decimal("0.5")

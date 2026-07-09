@@ -533,6 +533,79 @@ def test_measurement_recorder_applies_half_scaled_display_and_threshold_for_ancr
     assert sum(sleeper.calls[2:]) == pytest.approx(5)
 
 
+def test_measurement_recorder_does_not_half_scale_ancr_sensor_below_raw_current_3000() -> None:
+    sigma_downloader = FakeSigmaStudioDownloader()
+    sleeper = FakeSleeper()
+    instrument_reader = FakeInstrumentReader(
+        current_reading=CurrentReading(Decimal("2999"), "2999"),
+        sequence=[
+            CurrentReading(Decimal("100"), "100"),
+            CurrentReading(Decimal("100"), "100"),
+            CurrentReading(Decimal("100"), "100"),
+            CurrentReading(Decimal("2999"), "2999"),
+        ],
+    )
+    recorder = MeasurementRecorder(
+        instrument_reader=instrument_reader,
+        measurement_logger=FakeMeasurementLogger(),
+        measurement_threshold_by_mode=build_thresholds(),
+        measurement_mode_specs=build_measurement_mode_specs(),
+        application_logger=logging.getLogger("test.measurement_recorder.ancr_sensor_low_raw"),
+        status_service=FakeStatusService(),
+        sigma_studio_downloader=sigma_downloader,
+        download_trigger_raw_value=100,
+        download_trigger_confirm_count=3,
+        trigger_poll_interval_seconds=0.2,
+        measurement_delay_by_mode=build_delays(),
+        sleeper=sleeper,
+    )
+
+    record = recorder.measure_and_log(
+        SerialNumber("SN-ANCR-SENSOR-LOW"),
+        trigger="test",
+        measurement_mode=MeasurementMode.ANCR_SENSOR,
+    )
+
+    assert record.result == MeasurementResult.FAIL
+    assert record.calculation_factor == Decimal("1")
+    assert record.to_payload()["current_mA"] == "29.99"
+
+
+def test_measurement_recorder_half_scales_ancr_sensor_at_raw_current_3000() -> None:
+    instrument_reader = FakeInstrumentReader(
+        current_reading=CurrentReading(Decimal("3000"), "3000"),
+        sequence=[
+            CurrentReading(Decimal("100"), "100"),
+            CurrentReading(Decimal("100"), "100"),
+            CurrentReading(Decimal("100"), "100"),
+            CurrentReading(Decimal("3000"), "3000"),
+        ],
+    )
+    recorder = MeasurementRecorder(
+        instrument_reader=instrument_reader,
+        measurement_logger=FakeMeasurementLogger(),
+        measurement_threshold_by_mode=build_thresholds(),
+        measurement_mode_specs=build_measurement_mode_specs(),
+        application_logger=logging.getLogger("test.measurement_recorder.ancr_sensor_raw_30"),
+        status_service=FakeStatusService(),
+        sigma_studio_downloader=FakeSigmaStudioDownloader(),
+        download_trigger_raw_value=100,
+        download_trigger_confirm_count=3,
+        trigger_poll_interval_seconds=0.2,
+        measurement_delay_by_mode=build_delays(),
+        sleeper=FakeSleeper(),
+    )
+
+    record = recorder.measure_and_log(
+        SerialNumber("SN-ANCR-SENSOR-30"),
+        trigger="test",
+        measurement_mode=MeasurementMode.ANCR_SENSOR,
+    )
+
+    assert record.calculation_factor == Decimal("0.5")
+    assert record.to_payload()["current_mA"] == "15.00"
+
+
 def test_measurement_recorder_stops_when_session_cancel_requested_during_trigger_wait() -> None:
     status_service = FakeStatusService()
     sigma_downloader = FakeSigmaStudioDownloader()

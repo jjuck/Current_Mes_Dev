@@ -63,6 +63,25 @@ def test_status_service_preserves_datetime_from_current_csv_schema(tmp_path: Pat
     assert recent_item["SN"] == "SN-DATETIME"
 
 
+def test_status_service_loads_type_and_date_partitioned_logs(tmp_path: Path) -> None:
+    log_path = tmp_path / "logs" / "ANCRSensor" / "260615" / "260615_Current_ANCRSensor.csv"
+    log_path.parent.mkdir(parents=True)
+    log_path.write_text(
+        "datetime,SN,result,raw_current,current_mA,type,spec,Vop\n"
+        "2026-06-15T09:30:00,SN-ANCR-SENSOR,PASS,5000,25.00,ANCR Sensor,25.00mA,8\n",
+        encoding="utf-8-sig",
+    )
+
+    service = build_status_service(tmp_path, "logs/current_measurement_log.csv")
+
+    recent_item = service.get_recent_measurements()[0]
+
+    assert recent_item["measured_at"] == "2026-06-15T09:30:00"
+    assert recent_item["SN"] == "SN-ANCR-SENSOR"
+    assert recent_item["type"] == "ANCR Sensor"
+    assert recent_item["current_mA"] == "25.00"
+
+
 def test_status_service_normalizes_ancr_sensor_rows_with_half_scaled_display(tmp_path: Path) -> None:
     log_path = tmp_path / "current_measurement_log.csv"
     log_path.write_text(
@@ -132,6 +151,23 @@ def test_status_service_restores_ancr_sensor_scaling_from_legacy_row_with_traili
     assert recent_item["type"] == "ANCR Sensor"
     assert recent_item["spec"] == "25.00mA"
     assert recent_item["current_mA"] == "25.00"
+
+
+def test_status_service_does_not_half_scale_ancr_sensor_rows_below_raw_current_3000(tmp_path: Path) -> None:
+    log_path = tmp_path / "current_measurement_log.csv"
+    log_path.write_text(
+        "measured_at,qr_code,raw_current,mode\n"
+        "2026-04-10T15:11:18+09:00,SN-ANCR-SENSOR-LOW,2999,ancr_sensor\n",
+        encoding="utf-8-sig",
+    )
+
+    service = build_status_service(tmp_path)
+
+    recent_item = service.get_recent_measurements()[0]
+
+    assert recent_item["mode"] == "ANCR Sensor"
+    assert recent_item["current_mA"] == "29.99"
+    assert recent_item["result"] == "FAIL"
 
 
 def test_status_service_builds_port_specific_com_label(tmp_path: Path) -> None:

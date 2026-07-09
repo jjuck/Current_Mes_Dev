@@ -10,7 +10,15 @@ from pathlib import Path
 from threading import Lock
 import time
 
-from .domain import CurrentReading, MeasurementMode, MeasurementModeSpec, MeasurementRecord, MeasurementThreshold, SerialNumber
+from .domain import (
+    CurrentReading,
+    MeasurementMode,
+    MeasurementModeSpec,
+    MeasurementRecord,
+    MeasurementThreshold,
+    SerialNumber,
+    resolve_effective_calculation_factor,
+)
 
 
 class SessionPhase(StrEnum):
@@ -731,18 +739,45 @@ class MeasurementStatusService:
         self._legacy_log_csv_path.replace(self._log_csv_path)
 
     def _load_recent_measurements(self) -> None:
-        if not self._log_csv_path.exists() or self._log_csv_path.stat().st_size == 0:
+        log_csv_paths = self._iter_log_csv_paths()
+        if not log_csv_paths:
             return
 
-        with self._log_csv_path.open("r", encoding=self._log_encoding, newline="") as log_file:
-            reader = csv.DictReader(log_file)
-            normalized_rows = [self._normalize_row(row) for row in reader]
+        indexed_rows: list[tuple[str, int, dict[str, str]]] = []
+        for row_index, log_csv_path in enumerate(log_csv_paths):
+            if not log_csv_path.exists() or log_csv_path.stat().st_size == 0:
+                continue
 
+            with log_csv_path.open("r", encoding=self._log_encoding, newline="") as log_file:
+                reader = csv.DictReader(log_file)
+                for row in reader:
+                    normalized_row = self._normalize_row(row)
+                    indexed_rows.append((normalized_row["measured_at"], row_index, normalized_row))
+
+        indexed_rows.sort(key=lambda item: (item[0], item[1]))
+        normalized_rows = [row for _, _, row in indexed_rows]
         for row in normalized_rows:
             self._recent_measurements.append(row)
 
         if normalized_rows:
             self._last_measurement = normalized_rows[-1]
+
+    def _iter_log_csv_paths(self) -> list[Path]:
+        log_csv_paths = set()
+        if self._log_csv_path.exists():
+            log_csv_paths.add(self._log_csv_path)
+
+        log_root_path = self._log_root_path()
+        if log_root_path.exists():
+            log_csv_paths.update(log_root_path.rglob("*_Current_*.csv"))
+
+        return sorted(log_csv_paths)
+
+    def _log_root_path(self) -> Path:
+        if self._log_csv_path.suffix:
+            return self._log_csv_path.parent
+
+        return self._log_csv_path
 
     def _normalize_row(self, row: dict[str, str]) -> dict[str, str]:
         serial_number = (row.get("SN") or row.get("qr_code") or row.get("serial_number") or "").strip()
@@ -757,7 +792,12 @@ class MeasurementStatusService:
         )
 
         threshold = self._measurement_threshold_by_mode[resolved_mode]
-        result = (row.get("result") or "").strip() or threshold.classify(current_reading).value
+        effective_calculation_factor = resolve_effective_calculation_factor(
+            resolved_mode,
+            current_reading,
+            threshold.calculation_factor,
+        )
+        result = (row.get("result") or "").strip() or threshold.classify(current_reading, effective_calculation_factor).value
         spec_text = (row.get("spec") or self._measurement_threshold_to_spec_text(resolved_mode)).strip() or self._measurement_threshold_to_spec_text(resolved_mode)
 
         return {
@@ -768,7 +808,7 @@ class MeasurementStatusService:
             "spec": spec_text,
             "Vop": (row.get("Vop") or "8").strip() or "8",
             "raw_current": current_reading.as_text(),
-            "current_mA": current_reading.as_display_text(threshold.calculation_factor),
+            "current_mA": current_reading.as_display_text(effective_calculation_factor),
             "result": result,
             "mode": resolved_mode.display_name,
         }

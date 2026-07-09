@@ -9,6 +9,7 @@ venv/
 env/
 
 # Runtime artifacts
+artifacts/
 logs/*.tmp
 logs/*.bak
 

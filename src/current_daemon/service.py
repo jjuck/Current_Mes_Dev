@@ -8,7 +8,14 @@ from decimal import Decimal
 from threading import Lock
 
 from .config import AppConfig
-from .domain import MeasurementMode, MeasurementModeSpec, MeasurementRecord, MeasurementThreshold, SerialNumber
+from .domain import (
+    MeasurementMode,
+    MeasurementModeSpec,
+    MeasurementRecord,
+    MeasurementThreshold,
+    SerialNumber,
+    resolve_effective_calculation_factor,
+)
 from .logger import MeasurementCsvLogger
 from .serial_reader import SerialCommunicationError, WatanabeA7212Reader
 from .sigma_studio import SigmaStudioDownloader, SigmaStudioSettings
@@ -109,13 +116,22 @@ class MeasurementRecorder:
                 self._raise_if_session_cancel_requested(session_token)
 
                 mode_spec = self._measurement_mode_specs[resolved_mode]
+                effective_calculation_factor = resolve_effective_calculation_factor(
+                    resolved_mode,
+                    current_reading,
+                    mode_spec.calculation_factor,
+                )
+                result = self._measurement_threshold_by_mode[resolved_mode].classify(
+                    current_reading,
+                    effective_calculation_factor,
+                )
                 record = MeasurementRecord(
                     measured_at=datetime.now().astimezone(),
                     serial_number=serial_number,
                     current_reading=current_reading,
-                    result=self._measurement_threshold_by_mode[resolved_mode].classify(current_reading),
+                    result=result,
                     mode=resolved_mode,
-                    calculation_factor=mode_spec.calculation_factor,
+                    calculation_factor=effective_calculation_factor,
                     spec_text=mode_spec.spec_text(),
                     vop_text="8",
                 )
@@ -138,7 +154,7 @@ class MeasurementRecorder:
                     serial_number.as_text(),
                     mode_spec.display_name,
                     current_reading.as_text(),
-                    current_reading.as_display_text(mode_spec.calculation_factor),
+                    current_reading.as_display_text(effective_calculation_factor),
                     record.result.value,
                 )
                 return record
