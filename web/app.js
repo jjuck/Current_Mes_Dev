@@ -70,6 +70,9 @@ let englishInputSyncPromise = null;
 let lastEnglishInputSyncAt = 0;
 
 const ENGLISH_INPUT_SYNC_COOLDOWN_MS = 750;
+const BARCODE_RS = '\x1e';
+const BARCODE_GS = '\x1d';
+const BARCODE_EOT = '\x04';
 
 function escapeHtml(value) {
   return String(value)
@@ -78,6 +81,90 @@ function escapeHtml(value) {
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#039;');
+}
+
+function barcodeTextForDisplay(value) {
+  return String(value)
+    .replaceAll(BARCODE_RS, '<RS>')
+    .replaceAll(BARCODE_GS, '<GS>')
+    .replaceAll(BARCODE_EOT, '<EOT>');
+}
+
+function controlCharacterFromCode(code) {
+  if (code === BARCODE_RS.codePointAt(0)) {
+    return BARCODE_RS;
+  }
+
+  if (code === BARCODE_GS.codePointAt(0)) {
+    return BARCODE_GS;
+  }
+
+  if (code === BARCODE_EOT.codePointAt(0)) {
+    return BARCODE_EOT;
+  }
+
+  return null;
+}
+
+function controlCharacterFromScanEvent(event) {
+  if (event.key && event.key.length === 1) {
+    const directCharacter = controlCharacterFromCode(event.key.codePointAt(0));
+    if (directCharacter !== null) {
+      return directCharacter;
+    }
+  }
+
+  const characterCode = event.charCode || event.which || event.keyCode || 0;
+  const characterFromCode = controlCharacterFromCode(characterCode);
+  if (characterFromCode !== null) {
+    return characterFromCode;
+  }
+
+  if (!event.ctrlKey || event.altKey || event.metaKey) {
+    return null;
+  }
+
+  const key = event.key || '';
+  const code = event.code || '';
+  if (key.length === 1) {
+    const controlCode = key.toUpperCase().codePointAt(0) & 0x1F;
+    const characterFromControlCode = controlCharacterFromCode(controlCode);
+    if (characterFromControlCode !== null) {
+      return characterFromControlCode;
+    }
+  }
+
+  if (code === 'Digit6') {
+    return BARCODE_RS;
+  }
+
+  if (code === 'BracketRight') {
+    return BARCODE_GS;
+  }
+
+  if (code === 'KeyD') {
+    return BARCODE_EOT;
+  }
+
+  return null;
+}
+
+function insertTextAtCursor(targetInput, value) {
+  const start = targetInput.selectionStart ?? targetInput.value.length;
+  const end = targetInput.selectionEnd ?? targetInput.value.length;
+  targetInput.value = `${targetInput.value.slice(0, start)}${value}${targetInput.value.slice(end)}`;
+  const cursorPosition = start + value.length;
+  targetInput.setSelectionRange(cursorPosition, cursorPosition);
+}
+
+function recoverScanControlCharacter(event) {
+  const controlCharacter = controlCharacterFromScanEvent(event);
+  if (controlCharacter === null) {
+    return;
+  }
+
+  event.preventDefault();
+  insertTextAtCursor(input, controlCharacter);
 }
 
 async function ensureEnglishInputMode(options = {}) {
@@ -214,7 +301,7 @@ function renderRecentMeasurements(items) {
       return `
         <tr>
           <td>${escapeHtml(timeText)}</td>
-          <td><strong>${escapeHtml(item.qr_code)}</strong></td>
+          <td><strong>${escapeHtml(barcodeTextForDisplay(item.qr_code))}</strong></td>
           <td class="${valueClass}">${escapeHtml(item.current_mA)}</td>
           <td><span class="result-pill ${resultClass}">${escapeHtml(item.result)}</span></td>
         </tr>
@@ -226,7 +313,7 @@ function renderRecentMeasurements(items) {
 function renderMeasurement(status) {
   const displayMeasurement = status.displayMeasurement || {};
 
-  currentSerial.textContent = displayMeasurement.serialNumber || '-';
+  currentSerial.textContent = barcodeTextForDisplay(displayMeasurement.serialNumber || '-');
   currentValue.textContent = displayMeasurement.currentMilliampere || '0.00';
   heroResultDisplay.textContent = displayMeasurement.resultText || 'WAITING';
   resultPill.textContent = displayMeasurement.resultText || 'WAITING';
@@ -449,3 +536,7 @@ input.addEventListener('focus', () => {
 input.addEventListener('pointerdown', () => {
   requestEnglishInputMode({ force: true });
 });
+
+input.addEventListener('keydown', recoverScanControlCharacter, true);
+
+input.addEventListener('keypress', recoverScanControlCharacter, true);

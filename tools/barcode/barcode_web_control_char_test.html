@@ -1,0 +1,826 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Barcode Control Character Web Test</title>
+  <style>
+    :root {
+      --ink: #17211a;
+      --muted: #66736a;
+      --line: #cfd8d1;
+      --panel: #f7faf5;
+      --accent: #13795b;
+      --accent-weak: #dff3eb;
+      --warn: #b15c00;
+      --warn-weak: #fff0d6;
+      --bad: #b3261e;
+      --bad-weak: #ffe5e2;
+      --code-bg: #101914;
+      --code-ink: #dff8e9;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: #eef3ed;
+      color: var(--ink);
+      font-family: "Segoe UI", "Malgun Gothic", sans-serif;
+    }
+
+    main {
+      width: min(1180px, calc(100% - 32px));
+      margin: 24px auto;
+    }
+
+    header {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 18px 0;
+      border-bottom: 2px solid var(--ink);
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 28px;
+      letter-spacing: 0;
+    }
+
+    .status {
+      display: inline-flex;
+      align-items: center;
+      min-height: 34px;
+      padding: 0 12px;
+      border: 1px solid var(--line);
+      background: white;
+      font-size: 14px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.05fr) minmax(320px, 0.95fr);
+      gap: 16px;
+      margin-top: 18px;
+    }
+
+    section {
+      background: white;
+      border: 1px solid var(--line);
+      padding: 16px;
+    }
+
+    h2 {
+      margin: 0 0 12px;
+      font-size: 17px;
+    }
+
+    .scan-input {
+      width: 100%;
+      height: 54px;
+      border: 2px solid var(--ink);
+      padding: 0 14px;
+      color: var(--ink);
+      background: #fbfdf9;
+      font-size: 20px;
+      font-weight: 700;
+      outline: none;
+    }
+
+    .scan-input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 4px var(--accent-weak);
+    }
+
+    .button-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    button {
+      min-height: 38px;
+      border: 1px solid var(--ink);
+      padding: 0 12px;
+      color: var(--ink);
+      background: white;
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background: var(--accent-weak);
+    }
+
+    .primary {
+      color: white;
+      background: var(--accent);
+      border-color: var(--accent);
+    }
+
+    .primary:hover {
+      background: #0f674d;
+    }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .metric {
+      min-height: 72px;
+      border: 1px solid var(--line);
+      padding: 10px;
+      background: var(--panel);
+    }
+
+    .metric strong {
+      display: block;
+      margin-top: 6px;
+      font-size: 20px;
+    }
+
+    .metric span {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    .present {
+      background: var(--accent-weak);
+      border-color: var(--accent);
+    }
+
+    .missing {
+      background: var(--bad-weak);
+      border-color: var(--bad);
+    }
+
+    .readouts {
+      display: grid;
+      gap: 10px;
+    }
+
+    .readout {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      padding: 10px;
+    }
+
+    .readout label {
+      display: block;
+      margin-bottom: 6px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+      text-transform: uppercase;
+    }
+
+    code,
+    pre {
+      font-family: Consolas, "Cascadia Mono", monospace;
+      letter-spacing: 0;
+    }
+
+    pre {
+      min-height: 44px;
+      max-height: 180px;
+      margin: 0;
+      overflow: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+      color: var(--code-ink);
+      background: var(--code-bg);
+      padding: 10px;
+      line-height: 1.45;
+    }
+
+    .event-wrap {
+      grid-column: 1 / -1;
+    }
+
+    .table-shell {
+      max-height: 380px;
+      overflow: auto;
+      border: 1px solid var(--line);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    th,
+    td {
+      border-bottom: 1px solid var(--line);
+      padding: 8px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      background: #e7eee7;
+      font-size: 12px;
+      text-transform: uppercase;
+    }
+
+    td code {
+      color: #0f3f30;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+
+    .note {
+      margin: 10px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .warning {
+      margin-top: 12px;
+      border: 1px solid #e1b66b;
+      background: var(--warn-weak);
+      padding: 10px;
+      color: #694000;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .option {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      width: fit-content;
+      margin-top: 12px;
+      border: 1px solid var(--line);
+      background: var(--panel);
+      padding: 8px 10px;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .option input {
+      width: 18px;
+      height: 18px;
+      margin: 0;
+      accent-color: var(--accent);
+    }
+
+    .self-test-pass {
+      color: var(--accent);
+    }
+
+    .self-test-fail {
+      color: var(--bad);
+    }
+
+    @media (max-width: 840px) {
+      main {
+        width: min(100% - 20px, 1180px);
+        margin-top: 10px;
+      }
+
+      header,
+      .grid {
+        display: block;
+      }
+
+      section,
+      .event-wrap {
+        margin-top: 12px;
+      }
+
+      .metrics {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Barcode Control Character Web Test</h1>
+      <div id="self-test-status" class="status">SELF TEST...</div>
+    </header>
+
+    <div class="grid">
+      <section>
+        <h2>Scanner Input</h2>
+        <form id="scan-form" autocomplete="off">
+          <input
+            id="scan-input"
+            class="scan-input"
+            type="text"
+            lang="en"
+            inputmode="latin"
+            autocomplete="off"
+            autocapitalize="off"
+            autocorrect="off"
+            spellcheck="false"
+            autofocus
+          >
+        </form>
+        <div class="button-row">
+          <button id="focus-button" class="primary" type="button">Focus</button>
+          <button id="sample-button" type="button">Inject Sample</button>
+          <button id="clear-button" type="button">Clear</button>
+          <button id="copy-button" type="button">Copy Report</button>
+        </div>
+        <label class="option">
+          <input id="recover-control-keys" type="checkbox" checked>
+          Recover Ctrl key control characters
+        </label>
+        <div class="metrics">
+          <div id="rs-metric" class="metric missing">
+            <span>RS 0x1E</span>
+            <strong>NO</strong>
+          </div>
+          <div id="gs-metric" class="metric missing">
+            <span>GS 0x1D</span>
+            <strong>NO</strong>
+          </div>
+          <div id="eot-metric" class="metric missing">
+            <span>EOT 0x04</span>
+            <strong>NO</strong>
+          </div>
+        </div>
+        <div class="warning">
+          If Inject Sample shows RS/GS/EOT but an actual scanner does not, the browser is losing the control characters before they reach the input value.
+        </div>
+      </section>
+
+      <section>
+        <h2>Current Value</h2>
+        <div class="readouts">
+          <div class="readout">
+            <label>Visible Decode</label>
+            <pre id="visible-output"></pre>
+          </div>
+          <div class="readout">
+            <label>JavaScript Escapes</label>
+            <pre id="escaped-output"></pre>
+          </div>
+          <div class="readout">
+            <label>After JavaScript Trim</label>
+            <pre id="trimmed-output"></pre>
+          </div>
+          <div class="readout">
+            <label>UTF-8 Hex</label>
+            <pre id="hex-output"></pre>
+          </div>
+          <div class="readout">
+            <label>Code Points</label>
+            <pre id="codepoint-output"></pre>
+          </div>
+        </div>
+      </section>
+
+      <section class="event-wrap">
+        <h2>Browser Event Log</h2>
+        <div class="table-shell">
+          <table>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Event</th>
+                <th>Data / Key</th>
+                <th>Codes</th>
+                <th>Input Value</th>
+              </tr>
+            </thead>
+            <tbody id="event-log"></tbody>
+          </table>
+        </div>
+        <p class="note">A scanner that sends Enter will submit the form here, but the page prevents navigation so the captured value remains visible.</p>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    const RS = '\x1e';
+    const GS = '\x1d';
+    const EOT = '\x04';
+    const SAMPLE = `[)>${RS}06${GS}VRZWP${GS}96398GR500${GS}T251226${EOT}`;
+    const CONTROL_LABELS = new Map([
+      [RS, 'RS'],
+      [GS, 'GS'],
+      [EOT, 'EOT'],
+    ]);
+
+    const scanForm = document.querySelector('#scan-form');
+    const scanInput = document.querySelector('#scan-input');
+    const visibleOutput = document.querySelector('#visible-output');
+    const escapedOutput = document.querySelector('#escaped-output');
+    const trimmedOutput = document.querySelector('#trimmed-output');
+    const hexOutput = document.querySelector('#hex-output');
+    const codepointOutput = document.querySelector('#codepoint-output');
+    const eventLog = document.querySelector('#event-log');
+    const selfTestStatus = document.querySelector('#self-test-status');
+    const focusButton = document.querySelector('#focus-button');
+    const sampleButton = document.querySelector('#sample-button');
+    const clearButton = document.querySelector('#clear-button');
+    const copyButton = document.querySelector('#copy-button');
+    const recoverControlKeys = document.querySelector('#recover-control-keys');
+    const metrics = {
+      [RS]: document.querySelector('#rs-metric'),
+      [GS]: document.querySelector('#gs-metric'),
+      [EOT]: document.querySelector('#eot-metric'),
+    };
+
+    let eventIndex = 0;
+    const eventHistory = [];
+
+    function escapeHtml(value) {
+      return String(value)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#039;');
+    }
+
+    function visibleText(value) {
+      return Array.from(value, (character) => {
+        const label = CONTROL_LABELS.get(character);
+        if (label) {
+          return `<${label}>`;
+        }
+
+        const codePoint = character.codePointAt(0);
+        if (codePoint < 32 || codePoint === 127) {
+          return `<0x${codePoint.toString(16).toUpperCase().padStart(2, '0')}>`;
+        }
+
+        return character;
+      }).join('');
+    }
+
+    function jsEscapes(value) {
+      return Array.from(value, (character) => {
+        const codePoint = character.codePointAt(0);
+        if (codePoint < 32 || codePoint === 127) {
+          return `\\x${codePoint.toString(16).toUpperCase().padStart(2, '0')}`;
+        }
+
+        if (codePoint > 126) {
+          return `\\u{${codePoint.toString(16).toUpperCase()}}`;
+        }
+
+        if (character === '\\') {
+          return '\\\\';
+        }
+
+        return character;
+      }).join('');
+    }
+
+    function utf8Hex(value) {
+      return Array.from(new TextEncoder().encode(value), (byte) => (
+        byte.toString(16).toUpperCase().padStart(2, '0')
+      )).join(' ');
+    }
+
+    function codePoints(value) {
+      return Array.from(value, (character, index) => {
+        const label = CONTROL_LABELS.get(character) || character;
+        const renderedLabel = CONTROL_LABELS.has(character) ? `<${label}>` : label;
+        return `${index}:${renderedLabel}=U+${character.codePointAt(0).toString(16).toUpperCase().padStart(4, '0')}`;
+      }).join(' ');
+    }
+
+    function controlCharacterFromCode(code) {
+      if (code === RS.codePointAt(0)) {
+        return RS;
+      }
+
+      if (code === GS.codePointAt(0)) {
+        return GS;
+      }
+
+      if (code === EOT.codePointAt(0)) {
+        return EOT;
+      }
+
+      return null;
+    }
+
+    function controlCharacterFromKeyEvent(event) {
+      if (event.key && event.key.length === 1) {
+        const directCharacter = controlCharacterFromCode(event.key.codePointAt(0));
+        if (directCharacter !== null) {
+          return directCharacter;
+        }
+      }
+
+      const characterCode = event.charCode || event.which || event.keyCode || 0;
+      const characterFromCode = controlCharacterFromCode(characterCode);
+      if (characterFromCode !== null) {
+        return characterFromCode;
+      }
+
+      if (!event.ctrlKey || event.altKey || event.metaKey) {
+        return null;
+      }
+
+      const key = event.key || '';
+      const code = event.code || '';
+      if (key.length === 1) {
+        const controlCode = key.toUpperCase().codePointAt(0) & 0x1F;
+        if (controlCode === RS.codePointAt(0)) {
+          return RS;
+        }
+
+        if (controlCode === GS.codePointAt(0)) {
+          return GS;
+        }
+
+        if (controlCode === EOT.codePointAt(0)) {
+          return EOT;
+        }
+      }
+
+      if (code === 'Digit6') {
+        return RS;
+      }
+
+      if (code === 'BracketRight') {
+        return GS;
+      }
+
+      if (code === 'KeyD') {
+        return EOT;
+      }
+
+      return null;
+    }
+
+    function insertAtCursor(input, value) {
+      const start = input.selectionStart ?? input.value.length;
+      const end = input.selectionEnd ?? input.value.length;
+      input.value = `${input.value.slice(0, start)}${value}${input.value.slice(end)}`;
+      const cursorPosition = start + value.length;
+      input.setSelectionRange(cursorPosition, cursorPosition);
+    }
+
+    function recoverControlKey(event) {
+      if (!recoverControlKeys.checked) {
+        return;
+      }
+
+      const controlCharacter = controlCharacterFromKeyEvent(event);
+      if (controlCharacter === null) {
+        return;
+      }
+
+      event.preventDefault();
+      insertAtCursor(scanInput, controlCharacter);
+      updateReadouts();
+    }
+
+    function setMetric(character, isPresent) {
+      const metric = metrics[character];
+      metric.className = `metric ${isPresent ? 'present' : 'missing'}`;
+      metric.querySelector('strong').textContent = isPresent ? 'YES' : 'NO';
+    }
+
+    function updateReadouts() {
+      const value = scanInput.value;
+      visibleOutput.textContent = visibleText(value);
+      escapedOutput.textContent = jsEscapes(value);
+      trimmedOutput.textContent = jsEscapes(value.trim());
+      hexOutput.textContent = utf8Hex(value);
+      codepointOutput.textContent = codePoints(value);
+      setMetric(RS, value.includes(RS));
+      setMetric(GS, value.includes(GS));
+      setMetric(EOT, value.includes(EOT));
+    }
+
+    function eventCodes(event) {
+      const parts = [];
+      for (const key of ['key', 'code', 'keyCode', 'which', 'charCode', 'inputType']) {
+        if (event[key] !== undefined && event[key] !== '') {
+          parts.push(`${key}=${event[key]}`);
+        }
+      }
+
+      if (event.ctrlKey || event.altKey || event.shiftKey || event.metaKey) {
+        parts.push(`modifiers=${[
+          event.ctrlKey ? 'Ctrl' : '',
+          event.altKey ? 'Alt' : '',
+          event.shiftKey ? 'Shift' : '',
+          event.metaKey ? 'Meta' : '',
+        ].filter(Boolean).join('+')}`);
+      }
+
+      return parts.join(' | ');
+    }
+
+    function eventData(event) {
+      if (event.data !== undefined && event.data !== null) {
+        return event.data;
+      }
+
+      if (event.clipboardData) {
+        return event.clipboardData.getData('text/plain');
+      }
+
+      if (event.key && event.key.length === 1) {
+        return event.key;
+      }
+
+      return '';
+    }
+
+    function eventSource(event) {
+      if (event.target === scanInput) {
+        return 'input';
+      }
+
+      if (event.target?.id) {
+        return `#${event.target.id}`;
+      }
+
+      if (event.target?.tagName) {
+        return event.target.tagName.toLowerCase();
+      }
+
+      return 'document';
+    }
+
+    function eventSnapshot(event) {
+      const data = eventData(event);
+      return {
+        index: eventIndex,
+        source: eventSource(event),
+        type: event.type,
+        data: visibleText(data),
+        codes: eventCodes(event),
+        value: visibleText(scanInput.value),
+      };
+    }
+
+    function logEvent(event) {
+      const value = scanInput.value;
+      const data = eventData(event);
+      eventIndex += 1;
+      const snapshot = eventSnapshot(event);
+      snapshot.index = eventIndex;
+      eventHistory.unshift(snapshot);
+      while (eventHistory.length > 80) {
+        eventHistory.pop();
+      }
+
+      const row = document.createElement('tr');
+      row.innerHTML = `
+        <td>${eventIndex}</td>
+        <td><code>${escapeHtml(`${snapshot.source}:${event.type}`)}</code></td>
+        <td><code>${escapeHtml(visibleText(data))}</code></td>
+        <td><code>${escapeHtml(eventCodes(event))}</code></td>
+        <td><code>${escapeHtml(visibleText(value))}</code></td>
+      `;
+      eventLog.prepend(row);
+
+      while (eventLog.children.length > 80) {
+        eventLog.lastElementChild.remove();
+      }
+    }
+
+    function buildReport() {
+      const value = scanInput.value;
+      const reportLines = [
+        'Barcode Control Character Web Test',
+        `ctrl_recovery_enabled=${recoverControlKeys.checked}`,
+        `visible=${visibleText(value)}`,
+        `js_escapes=${jsEscapes(value)}`,
+        `js_trimmed_escapes=${jsEscapes(value.trim())}`,
+        `utf8_hex=${utf8Hex(value)}`,
+        `code_points=${codePoints(value)}`,
+        `contains_rs=${value.includes(RS)}`,
+        `contains_gs=${value.includes(GS)}`,
+        `contains_eot=${value.includes(EOT)}`,
+        '',
+        'Recent browser events:',
+      ];
+
+      if (eventHistory.length === 0) {
+        reportLines.push('(none)');
+      } else {
+        for (const item of eventHistory.slice(0, 20).reverse()) {
+          reportLines.push(
+            `${item.index}. ${item.source}:${item.type} data=${item.data} codes=${item.codes} value=${item.value}`
+          );
+        }
+      }
+
+      return reportLines.join('\n');
+    }
+
+    function runSelfTest() {
+      const selfTestValue = `A${RS}B${GS}C${EOT}D`;
+      const checks = [
+        visibleText(selfTestValue) === 'A<RS>B<GS>C<EOT>D',
+        jsEscapes(selfTestValue) === 'A\\x1EB\\x1DC\\x04D',
+        jsEscapes(selfTestValue.trim()) === 'A\\x1EB\\x1DC\\x04D',
+        controlCharacterFromKeyEvent({ ctrlKey: true, altKey: false, metaKey: false, key: '^', code: 'Digit6' }) === RS,
+        controlCharacterFromKeyEvent({ ctrlKey: true, altKey: false, metaKey: false, key: ']', code: 'BracketRight' }) === GS,
+        controlCharacterFromKeyEvent({ ctrlKey: true, altKey: false, metaKey: false, key: 'd', code: 'KeyD' }) === EOT,
+        controlCharacterFromKeyEvent({ ctrlKey: false, altKey: false, metaKey: false, key: RS, code: 'AltLeft', charCode: 30 }) === RS,
+        controlCharacterFromKeyEvent({ ctrlKey: false, altKey: false, metaKey: false, key: GS, code: 'AltLeft', charCode: 29 }) === GS,
+        controlCharacterFromKeyEvent({ ctrlKey: false, altKey: false, metaKey: false, key: EOT, code: 'AltLeft', charCode: 4 }) === EOT,
+        utf8Hex(selfTestValue) === '41 1E 42 1D 43 04 44',
+        codePoints(selfTestValue).includes('<RS>=U+001E'),
+        codePoints(selfTestValue).includes('<GS>=U+001D'),
+        codePoints(selfTestValue).includes('<EOT>=U+0004'),
+      ];
+
+      const passed = checks.every(Boolean);
+      selfTestStatus.textContent = passed ? 'SELF TEST PASS' : 'SELF TEST FAIL';
+      selfTestStatus.className = `status ${passed ? 'self-test-pass' : 'self-test-fail'}`;
+      return passed;
+    }
+
+    scanInput.addEventListener('keydown', recoverControlKey, true);
+    scanInput.addEventListener('keypress', recoverControlKey, true);
+
+    function recoverDocumentControlKey(event) {
+      if (event.target === scanInput) {
+        return;
+      }
+
+      recoverControlKey(event);
+      window.setTimeout(() => {
+        logEvent(event);
+        updateReadouts();
+      }, 0);
+    }
+
+    document.addEventListener('keydown', recoverDocumentControlKey, true);
+    document.addEventListener('keypress', recoverDocumentControlKey, true);
+
+    for (const eventType of ['keydown', 'keypress', 'beforeinput', 'input', 'paste', 'keyup']) {
+      scanInput.addEventListener(eventType, (event) => {
+        window.setTimeout(() => {
+          logEvent(event);
+          updateReadouts();
+        }, 0);
+      });
+    }
+
+    scanForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+      logEvent(event);
+      updateReadouts();
+    });
+
+    focusButton.addEventListener('click', () => {
+      scanInput.focus();
+      scanInput.select();
+    });
+
+    sampleButton.addEventListener('click', () => {
+      scanInput.value = SAMPLE;
+      updateReadouts();
+      scanInput.focus();
+    });
+
+    clearButton.addEventListener('click', () => {
+      scanInput.value = '';
+      eventLog.innerHTML = '';
+      eventIndex = 0;
+      eventHistory.length = 0;
+      updateReadouts();
+      scanInput.focus();
+    });
+
+    copyButton.addEventListener('click', async () => {
+      await navigator.clipboard.writeText(buildReport());
+      copyButton.textContent = 'Copied';
+      window.setTimeout(() => {
+        copyButton.textContent = 'Copy Report';
+      }, 900);
+      scanInput.focus();
+    });
+
+    runSelfTest();
+    updateReadouts();
+    window.setTimeout(() => scanInput.focus(), 0);
+  </script>
+</body>
+</html>

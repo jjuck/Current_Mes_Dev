@@ -158,7 +158,7 @@ def create_web_app(
 
     @app.post("/api/measurements")
     def create_measurement(request: MeasurementRequest) -> dict[str, object]:
-        normalized_qr_code = request.qr_code.strip()
+        normalized_qr_code = request.qr_code.strip(" \t\r\n")
         if not normalized_qr_code:
             raise HTTPException(status_code=400, detail="QR code is required.")
 
