@@ -14,6 +14,12 @@
 6. PASS 또는 FAIL 판정 후 로그 CSV에 저장합니다.
 7. 브라우저 UI는 WebSocket으로 백엔드 상태를 실시간 반영합니다.
 
+### 인터랙티브 아키텍처
+
+[![소비전류 검사 아키텍처](docs/architecture/preview.png)](https://jjuck.github.io/Current_Mes_Dev/architecture/)
+
+[인터랙티브 다이어그램 열기](https://jjuck.github.io/Current_Mes_Dev/architecture/) — 구성요소를 선택해 고정 커밋의 소스 근거와 연결 관계를 확인할 수 있습니다. 도식은 한국어이며 Viewer 메뉴는 영어입니다. 계측기와 SigmaStudio의 실동작 검증은 포함하지 않습니다.
+
 ## 2. 주요 기능
 
 - 로컬 웹 대시보드 UI
@@ -52,8 +58,8 @@
 - 계열: Digital
 - SigmaStudio 다운로드: 사용
 - 측정 전 대기: `5초`
-- 공정 상한: `30.00mA`
-- 표시값 계산과 PASS/FAIL 판정 모두 `1/2` 계산 계수 적용
+- 공정 상한: `25.00mA` (계수 적용 후 `raw 2500`)
+- 표시값 계산과 PASS/FAIL 판정 모두 원시값 `3000` 미만이면 계산 계수 `1`, `3000` 이상이면 `0.5` 적용
 
 ## 4. 공통 트리거 조건
 
@@ -83,11 +89,12 @@
 표시값 계산은 [`CurrentReading.as_display_text()`](src/current_daemon/domain.py:42) 와 [`MeasurementThreshold.classify()`](src/current_daemon/domain.py:120) 를 기준으로 동작합니다.
 
 - 기본 계산: `raw / 100`
-- [`ANCR Sensor`](src/current_daemon/domain.py:72) 는 계산 계수 `0.5` 적용
+- [`ANCR Sensor`](src/current_daemon/domain.py:72) 는 원시값 `3000` 미만이면 계산 계수 `1`, `3000` 이상이면 `0.5` 적용 (`raw × 계수 / 100`)
 
 예시:
 
 - raw `1000` → 일반 모드 표시 `10.00mA`
+- raw `1000` → [`ANCR Sensor`](src/current_daemon/domain.py:72) 표시 `10.00mA` (계수 `1`)
 - raw `5000` → [`ANCR Sensor`](src/current_daemon/domain.py:72) 표시 `25.00mA`
 
 ## 7. 로그 스키마

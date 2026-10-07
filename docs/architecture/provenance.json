@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "authored_on": "2026-10-07",
+  "source_repository": {
+    "url": "https://github.com/jjuck/Current_Mes_Dev.git",
+    "revision": "e63ca4ef13fde65ce0a943e5befa3691ffa13a72",
+    "provider": "github",
+    "link_mode": "web"
+  },
+  "generator": {
+    "name": "Archify",
+    "version": "3.0.1"
+  },
+  "specification_sha256": "71fbdf4148e613292463454ebe0aa2054d78706659ce2142ef180e91515edc49",
+  "original_html_sha256": "948b58879ba4868e6898c6b29b0d69513b3cffee3240293e25e957085e3c65c8",
+  "published_html_sha256": "841bad8d69e82b1c57cb1d59f8fa1e62e6397c4d4c41e834d293f4a68490a360",
+  "preview_sha256": "70138f2e69ac3b14bea418e26d278965528a9a1035bc8276928397e5eb6bad9e",
+  "gates": {
+    "validate": "pass",
+    "deliver": "pass",
+    "check": "pass",
+    "browser-check": "pass"
+  },
+  "visual_review": "light/dark 2048x1320 captures inspected",
+  "preview": {
+    "width": 2048,
+    "height": 1320,
+    "theme": "light"
+  },
+  "normalization": "Removed whitespace on blank CSS lines only; original browser evidence binds original HTML",
+  "candidate_transform": "meta.output only",
+  "snapshot": "committed-source; not live runtime/test validation",
+  "layout_advice": {
+    "resolvedCrossovers": 1,
+    "routesOverSuggestedBends": 4,
+    "routesOverSuggestedStretch": 1
+  }
+}

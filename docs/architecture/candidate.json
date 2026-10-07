@@ -1,0 +1,407 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Current Mes · 소비전류 검사 아키텍처",
+    "output": "docs/architecture/index.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/jjuck/Current_Mes_Dev.git",
+      "revision": "e63ca4ef13fde65ce0a943e5befa3691ffa13a72",
+      "provider": "github",
+      "link_mode": "web"
+    }
+  },
+  "components": [
+    {
+      "id": "ui",
+      "type": "frontend",
+      "label": "작업자 · 웹 검사 화면",
+      "sublabel": "QR / S/N · 모드 선택 · 중단",
+      "pos": [
+        40,
+        310
+      ],
+      "size": [
+        210,
+        76
+      ],
+      "sources": [
+        {
+          "path": "web/app.js",
+          "line": 393,
+          "end_line": 447
+        },
+        {
+          "path": "web/app.js",
+          "line": 451,
+          "end_line": 510
+        }
+      ]
+    },
+    {
+      "id": "api",
+      "type": "backend",
+      "label": "로컬 FastAPI",
+      "sublabel": "입력 검증 · HTTP / WebSocket",
+      "pos": [
+        440,
+        310
+      ],
+      "size": [
+        230,
+        76
+      ],
+      "sources": [
+        {
+          "path": "app.py",
+          "line": 79,
+          "end_line": 89
+        },
+        {
+          "path": "src/current_daemon/web_api.py",
+          "line": 105,
+          "end_line": 151
+        },
+        {
+          "path": "src/current_daemon/web_api.py",
+          "line": 159,
+          "end_line": 185
+        }
+      ]
+    },
+    {
+      "id": "recorder",
+      "type": "backend",
+      "label": "측정 서비스",
+      "sublabel": "원시값 ≥ 100 · 3회 연속 후 진행",
+      "tag": "MeasurementRecorder · 세션 잠금",
+      "pos": [
+        870,
+        310
+      ],
+      "size": [
+        250,
+        90
+      ],
+      "sources": [
+        {
+          "path": "src/current_daemon/service.py",
+          "line": 88,
+          "end_line": 165
+        },
+        {
+          "path": "src/current_daemon/service.py",
+          "line": 233,
+          "end_line": 299
+        },
+        {
+          "path": "src/current_daemon/service.py",
+          "line": 310,
+          "end_line": 344
+        }
+      ]
+    },
+    {
+      "id": "reader",
+      "type": "backend",
+      "label": "시리얼 리더",
+      "sublabel": "COM 감지 · 응답 파싱",
+      "pos": [
+        870,
+        40
+      ],
+      "size": [
+        250,
+        76
+      ],
+      "sources": [
+        {
+          "path": "src/current_daemon/serial_reader.py",
+          "line": 29,
+          "end_line": 45
+        },
+        {
+          "path": "src/current_daemon/serial_reader.py",
+          "line": 50,
+          "end_line": 101
+        },
+        {
+          "path": "src/current_daemon/serial_reader.py",
+          "line": 116,
+          "end_line": 126
+        }
+      ]
+    },
+    {
+      "id": "meter",
+      "type": "external",
+      "label": "Watanabe A7212 계측기",
+      "sublabel": "Serial · MES 명령 / 전류 응답",
+      "pos": [
+        1320,
+        40
+      ],
+      "size": [
+        240,
+        76
+      ],
+      "sources": [
+        {
+          "path": "src/current_daemon/serial_reader.py",
+          "line": 24,
+          "end_line": 45
+        },
+        {
+          "path": "src/current_daemon/config.py",
+          "line": 49,
+          "end_line": 57
+        }
+      ]
+    },
+    {
+      "id": "sigma",
+      "type": "backend",
+      "label": "SigmaStudio 연동",
+      "sublabel": "pythonnet / CLI → COMPILE_PROJECT",
+      "tag": "requires_download + 다운로더 구성",
+      "pos": [
+        855,
+        580
+      ],
+      "size": [
+        280,
+        90
+      ],
+      "sources": [
+        {
+          "path": "src/current_daemon/sigma_studio.py",
+          "line": 36,
+          "end_line": 74
+        },
+        {
+          "path": "src/current_daemon/sigma_studio.py",
+          "line": 101,
+          "end_line": 124
+        },
+        {
+          "path": "src/current_daemon/service.py",
+          "line": 364,
+          "end_line": 372
+        }
+      ]
+    },
+    {
+      "id": "logger",
+      "type": "backend",
+      "label": "CSV 기록 담당",
+      "sublabel": "MeasurementCsvLogger · append",
+      "pos": [
+        1320,
+        310
+      ],
+      "size": [
+        250,
+        76
+      ],
+      "sources": [
+        {
+          "path": "src/current_daemon/logger.py",
+          "line": 34,
+          "end_line": 65
+        },
+        {
+          "path": "src/current_daemon/logger.py",
+          "line": 67,
+          "end_line": 92
+        }
+      ]
+    },
+    {
+      "id": "csv",
+      "type": "database",
+      "label": "모드별 · 날짜별 CSV",
+      "sublabel": "logs / type / YYMMDD",
+      "pos": [
+        1320,
+        580
+      ],
+      "size": [
+        250,
+        76
+      ],
+      "sources": [
+        {
+          "path": "src/current_daemon/logger.py",
+          "line": 42,
+          "end_line": 55
+        },
+        {
+          "path": "src/current_daemon/status_service.py",
+          "line": 741,
+          "end_line": 774
+        }
+      ]
+    },
+    {
+      "id": "status",
+      "type": "backend",
+      "label": "세션 상태 · 최근 기록",
+      "sublabel": "메모리 상태 · 구독 큐",
+      "tag": "취소 요청 / 세션 토큰 무효화",
+      "pos": [
+        430,
+        580
+      ],
+      "size": [
+        250,
+        90
+      ],
+      "sources": [
+        {
+          "path": "src/current_daemon/status_service.py",
+          "line": 78,
+          "end_line": 203
+        },
+        {
+          "path": "src/current_daemon/status_service.py",
+          "line": 424,
+          "end_line": 503
+        },
+        {
+          "path": "src/current_daemon/status_service.py",
+          "line": 689,
+          "end_line": 774
+        }
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "submit",
+      "from": "ui",
+      "to": "api",
+      "label": "측정 / 모드 / 중단 요청",
+      "variant": "emphasis"
+    },
+    {
+      "id": "execute",
+      "from": "api",
+      "to": "recorder",
+      "label": "측정 / 취소 / 중단 위임",
+      "variant": "emphasis"
+    },
+    {
+      "id": "read",
+      "from": "recorder",
+      "to": "reader",
+      "label": "반복 감지 · 지연 후 최종 읽기"
+    },
+    {
+      "id": "serial",
+      "from": "reader",
+      "to": "meter",
+      "label": "Serial MES / 전류 응답"
+    },
+    {
+      "id": "download",
+      "from": "recorder",
+      "to": "sigma",
+      "label": "다운로드 필요 + 구성됨",
+      "variant": "dashed"
+    },
+    {
+      "id": "append",
+      "from": "recorder",
+      "to": "logger",
+      "label": "취소 확인 후 판정 기록",
+      "variant": "emphasis"
+    },
+    {
+      "id": "persist",
+      "from": "logger",
+      "to": "csv",
+      "label": "CSV 추가 / 구형 형식 이관"
+    },
+    {
+      "id": "restore",
+      "from": "csv",
+      "to": "status",
+      "label": "시작 시 최근 기록 읽기",
+      "variant": "dashed"
+    },
+    {
+      "id": "state",
+      "from": "recorder",
+      "to": "status",
+      "label": "단계 / 결과 / 취소 / 오류"
+    },
+    {
+      "id": "subscribe",
+      "from": "status",
+      "to": "api",
+      "label": "구독 큐 · 상태 페이로드"
+    },
+    {
+      "id": "stream",
+      "from": "api",
+      "to": "ui",
+      "label": "/ws/status · 결과 응답",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "bottom"
+    },
+    {
+      "id": "connection-probe",
+      "from": "api",
+      "to": "reader",
+      "label": "COM 연결 확인",
+      "variant": "dashed"
+    },
+    {
+      "id": "mode-status",
+      "from": "api",
+      "to": "status",
+      "label": "모드 · COM 상태 갱신",
+      "variant": "dashed"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "검사 진행 조건",
+      "items": [
+        "모든 모드: 원시값 ≥ 100을 3회 연속 감지, 0.2초 폴링. 미달이면 연속 횟수를 초기화한다.",
+        "Digital / ANCR Sensor: 다운로드 필요, 5초 대기. Analog / ANCR MIC: 다운로드 생략, 1초 대기.",
+        "다운로더 구성 시 pythonnet을 먼저 시도하고 예외 시 CLI로 전환한다. 실패하면 최종 측정으로 진행하지 않는다."
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "판정과 저장의 소유자",
+      "items": [
+        "서비스가 세션 잠금 안에서 최종 읽기 → 모드별 계수·상한 판정 → CSV logger 호출 → 상태 기록 순서를 제어한다.",
+        "CSV logger가 모드·날짜별 파일을 추가 기록하고 구형 위치·헤더를 이관합니다. 상태 서비스도 시작 시 legacy CSV를 옮길 수 있으며 최근 기록을 읽어 복원합니다.",
+        "ANCR Sensor: 기본 계수 0.5, 원시 입력 < 3000이면 계수 1. 판정 범위는 환산 원시값 10~2500이다."
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "중단과 오류 경계",
+      "items": [
+        "UI 중단은 interrupt-reset으로 세션 토큰을 갱신한다. 별도 cancel API는 활성 세션에 취소 플래그를 설정한다.",
+        "서비스가 폴링·대기·읽기 후·기록 전 취소를 확인한다. Sigma 호출 자체를 강제 종료하는 경로는 없다.",
+        "입력 오류 400, 일반 취소 409, 실행 실패 503입니다. Sigma 직후 감지한 취소는 다운로드 예외로 래핑되어 503이 됩니다. 서비스는 finally에서 세션을 정리합니다.",
+        "세션 단계·결과는 토큰 일치 조건으로 반영합니다. API의 COM probe와 모드·COM 상태 갱신은 별도 직접 경로입니다. WebSocket은 FastAPI가 구독 큐에서 읽어 전송합니다."
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "소스와 검증 범위",
+      "items": [
+        "각 구성요소의 소스 링크는 고정 커밋을 가리킨다. 이 도식은 정적 코드 조사이며 계측기·SigmaStudio 실동작을 검증하지 않았다.",
+        "다이어그램 설명은 한국어이며 Viewer 메뉴와 HTML 언어 기본값은 영어다."
+      ]
+    }
+  ]
+}
